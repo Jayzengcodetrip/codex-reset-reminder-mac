@@ -1,0 +1,2334 @@
+import AppKit
+import SwiftUI
+
+final class NotchViewModel: ObservableObject {
+    @Published private(set) var state: NotchPresentationState
+    @Published private(set) var now: Date
+    @Published private(set) var layoutMode: NotchLayoutMode
+    @Published private(set) var cameraSafeAreaInset: CGFloat
+    @Published private(set) var compactWidth: CGFloat
+    @Published private(set) var compactHeight: CGFloat
+    @Published private(set) var surfaceSize: CGSize
+    @Published private(set) var isResetScheduleExpanded = false
+    @Published private(set) var animationsEnabled: Bool
+    @Published var resetUnreadCount = 0
+    @Published var resetAwayUnreadCount = 0
+    @Published var resetStatusText = "正在检查重置公告…"
+    @Published var resetPreannouncements: [ResetAnnouncement] = []
+
+    var onOpenResetAnnouncements: () -> Void = {}
+
+    var onOpenThread: (String) -> Void
+    var onActivateChatGPT: () -> Void
+    var onHoverChanged: (Bool) -> Void
+    var onResetScheduleExpandedChanged: (Bool) -> Void
+
+    init(
+        state: NotchPresentationState = .hidden,
+        now: Date = .now,
+        layoutMode: NotchLayoutMode = .notch,
+        cameraSafeAreaInset: CGFloat = 0,
+        compactWidth: CGFloat = NotchCompactLayout.minimumWidth,
+        compactHeight: CGFloat = NotchCompactLayout.height,
+        surfaceSize: CGSize = CGSize(
+            width: NotchCompactLayout.minimumWidth,
+            height: NotchCompactLayout.height
+        ),
+        animationsEnabled: Bool = AppAnimationPreference.defaultEnabled,
+        onOpenThread: @escaping (String) -> Void = { _ in },
+        onActivateChatGPT: @escaping () -> Void = {},
+        onHoverChanged: @escaping (Bool) -> Void = { _ in },
+        onResetScheduleExpandedChanged: @escaping (Bool) -> Void = { _ in }
+    ) {
+        self.state = state
+        self.now = now
+        self.layoutMode = layoutMode
+        self.cameraSafeAreaInset = cameraSafeAreaInset
+        self.compactWidth = compactWidth
+        self.compactHeight = compactHeight
+        self.surfaceSize = surfaceSize
+        self.animationsEnabled = animationsEnabled
+        self.onOpenThread = onOpenThread
+        self.onActivateChatGPT = onActivateChatGPT
+        self.onHoverChanged = onHoverChanged
+        self.onResetScheduleExpandedChanged = onResetScheduleExpandedChanged
+    }
+
+    func update(
+        state: NotchPresentationState,
+        now: Date,
+        layoutMode: NotchLayoutMode = .notch,
+        cameraSafeAreaInset: CGFloat = 0,
+        compactWidth: CGFloat = NotchCompactLayout.minimumWidth,
+        compactHeight: CGFloat = NotchCompactLayout.height,
+        surfaceSize: CGSize = CGSize(
+            width: NotchCompactLayout.minimumWidth,
+            height: NotchCompactLayout.height
+        ),
+        isResetScheduleExpanded: Bool = false,
+        animationsEnabled: Bool = AppAnimationPreference.defaultEnabled
+    ) {
+        let resolvedNow = Self.secondPrecision(now)
+        let changesModel = self.state != state
+            || self.now != resolvedNow
+            || self.layoutMode != layoutMode
+            || self.cameraSafeAreaInset != cameraSafeAreaInset
+            || self.compactWidth != compactWidth
+            || self.compactHeight != compactHeight
+            || self.surfaceSize != surfaceSize
+            || self.isResetScheduleExpanded != isResetScheduleExpanded
+            || self.animationsEnabled != animationsEnabled
+        guard changesModel else { return }
+
+        let wasExpanded = Self.isExpanded(self.state)
+        let willBeExpanded = Self.isExpanded(state)
+        let changesSurface = wasExpanded != willBeExpanded
+            || self.layoutMode != layoutMode
+            || self.surfaceSize != surfaceSize
+            || self.compactWidth != compactWidth
+            || self.compactHeight != compactHeight
+            || self.isResetScheduleExpanded != isResetScheduleExpanded
+
+        let applyUpdate = {
+            if self.state != state { self.state = state }
+            if self.now != resolvedNow { self.now = resolvedNow }
+            if self.layoutMode != layoutMode { self.layoutMode = layoutMode }
+            if self.cameraSafeAreaInset != cameraSafeAreaInset {
+                self.cameraSafeAreaInset = cameraSafeAreaInset
+            }
+            if self.compactWidth != compactWidth { self.compactWidth = compactWidth }
+            if self.compactHeight != compactHeight { self.compactHeight = compactHeight }
+            if self.surfaceSize != surfaceSize { self.surfaceSize = surfaceSize }
+            if self.isResetScheduleExpanded != isResetScheduleExpanded {
+                self.isResetScheduleExpanded = isResetScheduleExpanded
+            }
+            if self.animationsEnabled != animationsEnabled {
+                self.animationsEnabled = animationsEnabled
+            }
+        }
+
+        if NotchPresentationMotion.shouldAnimateSurface(
+            changesSurface: changesSurface,
+            animationsEnabled: animationsEnabled
+        ) {
+            let expands = surfaceSize.height > self.surfaceSize.height + 0.5
+                || surfaceSize.width > self.surfaceSize.width + 0.5
+                || (isResetScheduleExpanded && !self.isResetScheduleExpanded)
+            withAnimation(NotchPresentationMotion.animation(forExpanding: expands)) {
+                applyUpdate()
+            }
+        } else if changesSurface || !animationsEnabled {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                applyUpdate()
+            }
+        } else {
+            applyUpdate()
+        }
+    }
+
+    func updateClock(now: Date) {
+        let resolvedNow = Self.secondPrecision(now)
+        guard self.now != resolvedNow else { return }
+        self.now = resolvedNow
+    }
+
+    private static func isExpanded(_ state: NotchPresentationState) -> Bool {
+        if case .expanded = state { return true }
+        return false
+    }
+
+    private static func secondPrecision(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: date.timeIntervalSince1970.rounded(.down))
+    }
+}
+
+struct NotchView: View {
+    @ObservedObject private var model: NotchViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(QuotaDisplayStyle.storageKey)
+    private var quotaDisplayStyleRaw = QuotaDisplayStyle.defaultStyle.rawValue
+    @AppStorage(StatusIconStyle.storageKey)
+    private var statusIconStyleRaw = StatusIconStyle.defaultStyle.rawValue
+    @AppStorage(AppLanguage.storageKey)
+    private var appLanguageRaw = AppLanguage.defaultLanguage.rawValue
+    @AppStorage(NotchDisplayPreference.storageKey)
+    private var notchDisplayEnabled = NotchDisplayPreference.defaultEnabled
+    @State private var isPointerInside = false
+
+    private var quotaDisplayStyle: QuotaDisplayStyle {
+        QuotaDisplayStyle.fromStoredValue(quotaDisplayStyleRaw)
+    }
+
+    private var appLanguage: AppLanguage {
+        AppLanguage.fromStoredValue(appLanguageRaw)
+    }
+
+    private var motionEnabled: Bool {
+        AppAnimationPreference.allowsMotion(
+            animationsEnabled: model.animationsEnabled,
+            reduceMotion: reduceMotion
+        )
+    }
+
+    private var isExpanded: Bool {
+        if case .expanded = model.state { return true }
+        return false
+    }
+
+    private var isTaskRunning: Bool {
+        switch model.state {
+        case .workingCompact:
+            return true
+        case let .expanded(content):
+            return !content.sessions.isEmpty
+        case .hidden, .quotaCompact, .completedCompact:
+            return false
+        }
+    }
+
+    private var isHidden: Bool {
+        model.state == .hidden
+    }
+
+    private var surfaceMaterial: NotchSurfaceMaterial {
+        NotchSurfaceMaterial.resolve(isHidden: isHidden)
+    }
+
+    private var surfaceBorder: Color {
+        switch surfaceMaterial {
+        case .black:
+            return isExpanded ? NotchPalette.border : .clear
+        case .clear:
+            return .clear
+        }
+    }
+
+    private var surfaceSize: CGSize {
+        if isHidden || isExpanded {
+            return model.surfaceSize
+        }
+        return CGSize(
+            width: model.compactWidth,
+            height: model.compactHeight
+        )
+    }
+
+    private var surfaceShape: NotchSurfaceShape {
+        NotchSurfaceShape(
+            layoutMode: model.layoutMode,
+            shoulderDepth: 6,
+            bottomRadius: isExpanded ? 22 : 14
+        )
+    }
+
+    init(
+        state: NotchPresentationState,
+        now: Date = .now,
+        onOpenThread: @escaping (String) -> Void = { _ in },
+        onActivateChatGPT: @escaping () -> Void = {},
+        onHoverChanged: @escaping (Bool) -> Void = { _ in }
+    ) {
+        self.init(
+            model: NotchViewModel(
+                state: state,
+                now: now,
+                onOpenThread: onOpenThread,
+                onActivateChatGPT: onActivateChatGPT,
+                onHoverChanged: onHoverChanged
+            )
+        )
+    }
+
+    init(model: NotchViewModel) {
+        _model = ObservedObject(wrappedValue: model)
+    }
+
+    var body: some View {
+        Group {
+            switch model.state {
+            case .hidden:
+                Color.clear
+            case let .quotaCompact(usage):
+                CompactNotchView(
+                    layoutMode: model.layoutMode,
+                    compactHeight: model.compactHeight,
+                    icon: .quota,
+                    title: appLanguage.localized(
+                        chinese: "Codex 就绪",
+                        english: "Codex ready"
+                    ),
+                    subtitle: NotchText.quotaSubtitle(usage: usage, language: appLanguage),
+                    usage: usage,
+                    quotaDisplayStyle: quotaDisplayStyle,
+                    resetUnreadCount: model.resetUnreadCount,
+                    action: model.onActivateChatGPT
+                )
+            case let .workingCompact(primary, count, usage):
+                CompactNotchView(
+                    layoutMode: model.layoutMode,
+                    compactHeight: model.compactHeight,
+                    icon: .working,
+                    title: NotchText.compactActivityTitle(
+                        primary.title,
+                        fallback: appLanguage.localized(
+                            chinese: "Codex 运行中",
+                            english: "Codex running"
+                        )
+                    ),
+                    subtitle: count > 1
+                        ? appLanguage.localized(
+                            chinese: "\(count) 个任务",
+                            english: "\(count) tasks"
+                        )
+                        : appLanguage.localized(
+                            chinese: "已运行 \(NotchText.formatDuration(seconds: max(0, model.now.timeIntervalSince(primary.startedAt))))",
+                            english: "Running for \(NotchText.formatDuration(seconds: max(0, model.now.timeIntervalSince(primary.startedAt))))"
+                        ),
+                    usage: usage,
+                    quotaDisplayStyle: quotaDisplayStyle,
+                    resetUnreadCount: model.resetUnreadCount,
+                    action: { model.onOpenThread(primary.threadID) }
+                )
+            case let .completedCompact(session, usage):
+                CompactNotchView(
+                    layoutMode: model.layoutMode,
+                    compactHeight: model.compactHeight,
+                    icon: .completed,
+                    title: NotchText.compactActivityTitle(
+                        session.title,
+                        fallback: appLanguage.localized(
+                            chinese: "Codex 已完成",
+                            english: "Codex completed"
+                        )
+                    ),
+                    subtitle: NotchText.projectName(cwd: session.cwd, language: appLanguage),
+                    usage: usage,
+                    quotaDisplayStyle: quotaDisplayStyle,
+                    resetUnreadCount: model.resetUnreadCount,
+                    action: { model.onOpenThread(session.threadID) }
+                )
+            case let .expanded(content):
+                ExpandedNotchView(
+                    content: content,
+                    now: model.now,
+                    layoutMode: model.layoutMode,
+                    cameraSafeAreaInset: model.cameraSafeAreaInset,
+                    compactWidth: model.compactWidth,
+                    compactHeight: model.compactHeight,
+                    quotaDisplayStyle: quotaDisplayStyle,
+                    language: appLanguage,
+                    isResetScheduleExpanded: model.isResetScheduleExpanded,
+                    resetUnreadCount: model.resetUnreadCount,
+                    resetAwayUnreadCount: model.resetAwayUnreadCount,
+                    resetStatusText: model.resetStatusText,
+                    resetPreannouncements: model.resetPreannouncements,
+                    onOpenResetAnnouncements: model.onOpenResetAnnouncements,
+                    onActivateChatGPT: model.onActivateChatGPT,
+                    onOpenThread: model.onOpenThread,
+                    onResetScheduleExpandedChanged: model.onResetScheduleExpandedChanged,
+                    notchDisplayEnabled: notchDisplayEnabled,
+                    onNotchDisplayEnabledChanged: { notchDisplayEnabled = $0 }
+                )
+                .transition(.opacity)
+            }
+        }
+        // The panel is already at its final size before this state changes.
+        // Animate this one visible surface from the compact island downward;
+        // clear canvas around it never becomes part of the notch itself.
+        .frame(
+            width: surfaceSize.width,
+            height: surfaceSize.height,
+            alignment: .top
+        )
+        .contentShape(surfaceShape)
+        .background {
+            NotchSurfaceBackground(
+                material: surfaceMaterial,
+                shape: surfaceShape
+            )
+        }
+        .clipShape(surfaceShape)
+        .overlay {
+            surfaceShape.stroke(
+                surfaceBorder,
+                lineWidth: 0.5
+            )
+        }
+        .onHover { hovering in
+            withAnimation(
+                motionEnabled
+                    ? .spring(response: 0.28, dampingFraction: 0.84)
+                    : nil
+            ) {
+                isPointerInside = hovering
+            }
+            model.onHoverChanged(hovering)
+        }
+        .contextMenu {
+            Button(action: model.onOpenResetAnnouncements) {
+                Label(
+                    appLanguage.localized(chinese: "重置公告", english: "Reset announcements"),
+                    systemImage: "bell.badge"
+                )
+            }
+
+            Divider()
+
+            Button {
+                notchDisplayEnabled = false
+            } label: {
+                Label(
+                    appLanguage.localized(
+                        chinese: model.layoutMode == .floatingBar ? "隐藏悬浮岛" : "隐藏刘海",
+                        english: model.layoutMode == .floatingBar ? "Hide activity island" : "Hide notch"
+                    ),
+                    systemImage: "eye.slash"
+                )
+            }
+
+            Divider()
+
+            SettingsLink {
+                Label(
+                    appLanguage.localized(chinese: "设置…", english: "Settings…"),
+                    systemImage: "gearshape"
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .environment(\.notchAppLanguage, appLanguage)
+        .environment(\.notchStatusIconStyle, StatusIconStyle.fromStoredValue(statusIconStyleRaw))
+        .environment(\.notchMotionEnabled, motionEnabled)
+        .transaction { transaction in
+            guard !motionEnabled else { return }
+            transaction.animation = nil
+            transaction.disablesAnimations = true
+        }
+    }
+}
+
+private struct NotchAppLanguageKey: EnvironmentKey {
+    static let defaultValue = AppLanguage.defaultLanguage
+}
+
+private struct NotchMotionEnabledKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+private struct NotchStatusIconStyleKey: EnvironmentKey {
+    static let defaultValue = StatusIconStyle.defaultStyle
+}
+
+extension EnvironmentValues {
+    var notchStatusIconStyle: StatusIconStyle {
+        get { self[NotchStatusIconStyleKey.self] }
+        set { self[NotchStatusIconStyleKey.self] = newValue }
+    }
+
+    var notchAppLanguage: AppLanguage {
+        get { self[NotchAppLanguageKey.self] }
+        set { self[NotchAppLanguageKey.self] = newValue }
+    }
+
+    var notchMotionEnabled: Bool {
+        get { self[NotchMotionEnabledKey.self] }
+        set { self[NotchMotionEnabledKey.self] = newValue }
+    }
+}
+
+private struct NotchSurfaceBackground: View {
+    let material: NotchSurfaceMaterial
+    let shape: NotchSurfaceShape
+
+    @ViewBuilder
+    var body: some View {
+        switch material {
+        case .clear:
+            Color.clear
+        case .black:
+            NotchPalette.background
+        }
+    }
+}
+
+struct NotchSurfaceShape: Shape {
+    let layoutMode: NotchLayoutMode
+    var shoulderDepth: CGFloat
+    var bottomRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        if layoutMode == .floatingBar {
+            return NotchAttachedShape(
+                shoulderDepth: 0,
+                bottomRadius: bottomRadius
+            ).path(in: rect)
+        }
+
+        return NotchAttachedShape(
+            shoulderDepth: shoulderDepth,
+            bottomRadius: bottomRadius
+        )
+        .path(in: rect)
+    }
+}
+
+private struct NotchAttachedShape: Shape {
+    var shoulderDepth: CGFloat
+    var bottomRadius: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(shoulderDepth, bottomRadius) }
+        set {
+            shoulderDepth = newValue.first
+            bottomRadius = newValue.second
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let shoulder = min(max(0, shoulderDepth), rect.height / 2)
+        let radius = min(
+            max(0, bottomRadius),
+            max(0, rect.height - shoulder),
+            max(0, rect.width / 2 - shoulder)
+        )
+        let curve = CGFloat(0.55)
+
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addCurve(
+            to: CGPoint(x: rect.maxX - shoulder, y: rect.minY + shoulder),
+            control1: CGPoint(x: rect.maxX - shoulder * curve, y: rect.minY),
+            control2: CGPoint(x: rect.maxX - shoulder, y: rect.minY + shoulder * curve)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - shoulder, y: rect.maxY - radius))
+        path.addCurve(
+            to: CGPoint(x: rect.maxX - shoulder - radius, y: rect.maxY),
+            control1: CGPoint(x: rect.maxX - shoulder, y: rect.maxY - radius * curve),
+            control2: CGPoint(x: rect.maxX - shoulder - radius * curve, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.minX + shoulder + radius, y: rect.maxY))
+        path.addCurve(
+            to: CGPoint(x: rect.minX + shoulder, y: rect.maxY - radius),
+            control1: CGPoint(x: rect.minX + shoulder + radius * curve, y: rect.maxY),
+            control2: CGPoint(x: rect.minX + shoulder, y: rect.maxY - radius * curve)
+        )
+        path.addLine(to: CGPoint(x: rect.minX + shoulder, y: rect.minY + shoulder))
+        path.addCurve(
+            to: CGPoint(x: rect.minX, y: rect.minY),
+            control1: CGPoint(x: rect.minX + shoulder, y: rect.minY + shoulder * curve),
+            control2: CGPoint(x: rect.minX + shoulder * curve, y: rect.minY)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+enum CompactLeftIndicatorPolicy {
+    enum Content: Equatable {
+        case fiveHourQuota
+        case appStatus
+    }
+
+    static func content(
+        layoutMode: NotchLayoutMode,
+        hasFiveHourWindow: Bool
+    ) -> Content {
+        if (layoutMode == .notch || layoutMode == .floatingBar) && hasFiveHourWindow {
+            return .fiveHourQuota
+        }
+        return .appStatus
+    }
+}
+
+private struct CompactNotchView: View {
+    enum IconKind: Equatable {
+        case quota
+        case working
+        case completed
+
+        var quotaActivity: QuotaRingActivity {
+            switch self {
+            case .quota: return .idle
+            case .working: return .running
+            case .completed: return .completed
+            }
+        }
+
+    }
+
+    let layoutMode: NotchLayoutMode
+    let compactHeight: CGFloat
+    let icon: IconKind
+    let title: String
+    let subtitle: String
+    let usage: UsageSnapshot?
+    let quotaDisplayStyle: QuotaDisplayStyle
+    let resetUnreadCount: Int
+    let action: () -> Void
+    @Environment(\.notchAppLanguage) private var language
+
+    var body: some View {
+        Button(action: action) {
+            compactContent
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(NotchButtonStyle())
+        .accessibilityLabel(accessibilityText)
+    }
+
+    @ViewBuilder
+    private var compactContent: some View {
+        if layoutMode == .floatingBar {
+            HStack(spacing: 0) {
+                compactLeftIndicator
+                    .frame(
+                        width: NotchFloatingBarLayout.appLaneWidth,
+                        height: compactHeight
+                    )
+                    .overlay(alignment: .topLeading) { unreadDot }
+
+                SwordWandererBattleView(compactHeight: compactHeight)
+                    .frame(
+                        width: NotchFloatingBarLayout.battleLaneWidth,
+                        height: compactHeight
+                    )
+
+                CompactQuotaView(
+                    window: usage?.weeklyWindow,
+                    activity: icon.quotaActivity,
+                    style: quotaDisplayStyle,
+                    layoutMode: .floatingBar,
+                    laneWidth: NotchFloatingBarLayout.quotaLaneWidth
+                )
+            }
+            .padding(.horizontal, NotchFloatingBarLayout.horizontalInset)
+        } else {
+            HStack(spacing: 0) {
+                compactLeftIndicator
+                    .frame(
+                        width: NotchCompactLayout.indicatorLaneWidth,
+                        height: NotchCompactLayout.height
+                    )
+                    .overlay(alignment: .topLeading) { unreadDot }
+
+                Spacer(minLength: 0)
+
+                // The wider content lanes move both indicators slightly toward
+                // the camera while keeping their visible shapes outside it.
+                CompactQuotaView(
+                    window: usage?.weeklyWindow,
+                    activity: icon.quotaActivity,
+                    style: quotaDisplayStyle,
+                    layoutMode: .notch
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var unreadDot: some View {
+        if resetUnreadCount > 0 {
+            Circle()
+                .fill(Color.orange)
+                .frame(width: 6, height: 6)
+                .overlay { Circle().stroke(Color.black, lineWidth: 1) }
+                // Stay at the outside edge of the existing left wing. Neither
+                // the quota/status indicator nor the camera clearance moves.
+                .padding(.leading, layoutMode == .floatingBar ? 1 : 4)
+                .padding(.top, 3)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder
+    private var compactLeftIndicator: some View {
+        switch CompactLeftIndicatorPolicy.content(
+            layoutMode: layoutMode,
+            hasFiveHourWindow: usage?.fiveHourWindow != nil
+        ) {
+        case .fiveHourQuota:
+            if let fiveHourWindow = usage?.fiveHourWindow {
+                CompactQuotaView(
+                    window: fiveHourWindow,
+                    activity: icon.quotaActivity,
+                    style: quotaDisplayStyle,
+                    layoutMode: layoutMode,
+                    laneWidth: layoutMode == .floatingBar
+                        ? NotchFloatingBarLayout.appLaneWidth
+                        : NotchCompactLayout.indicatorLaneWidth
+                )
+            } else {
+                CompactAppIconView(status: icon, theme: StatusIconTheme(usage: usage))
+            }
+        case .appStatus:
+            CompactAppIconView(status: icon, theme: StatusIconTheme(usage: usage))
+        }
+    }
+
+    private var accessibilityText: String {
+        var parts = [title, subtitle]
+        if let usage, !usage.windows.isEmpty {
+            parts.append(NotchText.quotaSubtitle(usage: usage, language: language))
+        }
+        if resetUnreadCount > 0 {
+            parts.append(language.localized(
+                chinese: "\(resetUnreadCount) 条未读重置动态",
+                english: "\(resetUnreadCount) unread reset updates"
+            ))
+        }
+        return parts.joined(separator: language == .english ? ", " : "，")
+    }
+
+}
+
+private struct CompactAppIconView: View {
+    let status: CompactNotchView.IconKind
+    let theme: StatusIconTheme
+    @Environment(\.notchStatusIconStyle) private var iconStyle
+
+    var body: some View {
+        Group {
+            switch status {
+            case .working:
+                RunningStatusIcon(iconStyle: iconStyle, size: NotchCompactLayout.appMarkSize, theme: theme)
+            case .completed:
+                CompletedStatusIcon(iconStyle: iconStyle, size: NotchCompactLayout.appMarkSize, theme: theme)
+            case .quota:
+                StatusMark(style: iconStyle, size: NotchCompactLayout.appMarkSize, theme: theme)
+            }
+        }
+        .frame(
+            width: NotchCompactLayout.indicatorDiameter,
+            height: NotchCompactLayout.height
+        )
+        .accessibilityHidden(true)
+    }
+}
+
+private struct CompactQuotaView: View {
+    let window: UsageWindow?
+    let activity: QuotaRingActivity
+    let style: QuotaDisplayStyle
+    let layoutMode: NotchLayoutMode
+    var laneWidth = NotchCompactLayout.indicatorLaneWidth
+
+    @Environment(\.notchMotionEnabled) private var motionEnabled
+
+    var body: some View {
+        ZStack {
+            if QuotaRunningHaloMotion.shouldAnimate(
+                layoutMode: layoutMode,
+                activity: activity,
+                hasQuota: window != nil,
+                motionEnabled: motionEnabled
+            ) {
+                // This is intentionally centered on the visible quota circle,
+                // never on the physical camera cutout in the middle.
+                QuotaRunningHaloView(isAnimating: true)
+                    .frame(
+                        width: QuotaRunningHaloMotion.visualDiameter,
+                        height: QuotaRunningHaloMotion.visualDiameter
+                    )
+                    .allowsHitTesting(false)
+            }
+
+            quotaIndicator
+        }
+            .offset(x: NotchCompactLayout.quotaIndicatorOutwardOffset)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .frame(
+                width: laneWidth,
+                height: NotchCompactLayout.height,
+                alignment: .center
+            )
+            .accessibilityHidden(true)
+    }
+
+    private var quotaIndicator: some View {
+        QuotaIndicatorView(
+            style: style,
+            window: window,
+            activity: activity,
+            diameter: NotchCompactLayout.indicatorDiameter,
+            lineWidth: NotchCompactLayout.quotaIndicatorLineWidth(for: style),
+            fontSize: NotchCompactLayout.quotaValueFontSize
+        )
+    }
+}
+
+private struct CompletedStatusIcon: View {
+    @Environment(\.notchMotionEnabled) private var motionEnabled
+    @State private var hasSettled = false
+
+    let iconStyle: StatusIconStyle
+    let size: CGFloat
+    let theme: StatusIconTheme
+
+    var body: some View {
+        ZStack {
+            if motionEnabled {
+                StatusMark(style: iconStyle, size: size, tint: NotchPalette.success, monochrome: true)
+                    .scaleEffect(hasSettled ? 1.14 : 0.92)
+                    .opacity(hasSettled ? 0 : 0.42)
+                    .blur(radius: hasSettled ? 0.5 : 0)
+            }
+
+            StatusMark(style: iconStyle, size: size, theme: theme)
+
+            Image(systemName: "checkmark")
+                .font(.system(size: 6.5, weight: .black))
+                .foregroundStyle(Color.black)
+                .frame(width: 11, height: 11)
+                .background(NotchPalette.success, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(NotchPalette.background, lineWidth: 1)
+                }
+                .offset(x: 6, y: 6)
+        }
+        .frame(width: size, height: size)
+        .onAppear {
+            guard motionEnabled else { return }
+            hasSettled = true
+        }
+        .animation(
+            motionEnabled ? .easeOut(duration: 0.48) : nil,
+            value: hasSettled
+        )
+    }
+}
+
+private struct RunningStatusIcon: View {
+    let iconStyle: StatusIconStyle
+    let size: CGFloat
+    let theme: StatusIconTheme
+    @Environment(\.notchMotionEnabled) private var motionEnabled
+
+    var body: some View {
+        ZStack {
+            if motionEnabled, iconStyle.templateImage != nil {
+                StatusMarkEchoLayer(isAnimating: true, iconStyle: iconStyle, color: theme.runningEcho)
+                    .frame(width: size, height: size)
+                    .allowsHitTesting(false)
+            } else {
+                StatusMark(style: iconStyle, size: size, tint: theme.runningEchoColor.opacity(0.38), monochrome: true)
+                    .scaleEffect(1.05)
+                    .blur(radius: 0.2)
+            }
+
+            StatusMark(style: iconStyle, size: size, theme: theme)
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+private struct QuotaIndicatorView: View {
+    let style: QuotaDisplayStyle
+    let window: UsageWindow?
+    let activity: QuotaRingActivity
+    let diameter: CGFloat
+    let lineWidth: CGFloat
+    let fontSize: CGFloat
+
+    var body: some View {
+        switch style {
+        case .clockwiseRing:
+            QuotaRing(
+                style: style,
+                window: window,
+                activity: activity,
+                diameter: diameter,
+                lineWidth: lineWidth,
+                fontSize: fontSize
+            )
+        case .waveBall:
+            QuotaWaveBall(
+                window: window,
+                activity: activity,
+                diameter: diameter,
+                lineWidth: lineWidth,
+                fontSize: fontSize
+            )
+        }
+    }
+}
+
+private struct QuotaCompletionParticles: View {
+    let color: Color
+    let diameter: CGFloat
+
+    @State private var startedAt = Date()
+    @State private var hasFinished = false
+
+    var body: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: 1.0 / 60.0,
+                paused: hasFinished
+            )
+        ) { context in
+            particleField(
+                elapsed: context.date.timeIntervalSince(startedAt)
+            )
+        }
+        .onAppear {
+            startedAt = .now
+            hasFinished = false
+        }
+        .task {
+            try? await Task.sleep(
+                nanoseconds: UInt64(
+                    QuotaIndicatorMotion.completionFireworkTotalDuration
+                        * 1_000_000_000
+                )
+            )
+            guard !Task.isCancelled else { return }
+            hasFinished = true
+        }
+    }
+
+    private func particleField(elapsed: TimeInterval) -> some View {
+        ZStack {
+            ignitionFlash(elapsed: elapsed)
+
+            ForEach(
+                Array(QuotaIndicatorMotion.completionParticles.enumerated()),
+                id: \.offset
+            ) { _, spec in
+                particle(spec: spec, elapsed: elapsed)
+            }
+
+            ForEach(
+                Array(QuotaIndicatorMotion.completionEndpointSparks.enumerated()),
+                id: \.offset
+            ) { _, spec in
+                endpointSpark(spec: spec, elapsed: elapsed)
+            }
+        }
+        .frame(width: diameter, height: diameter)
+    }
+
+    private func ignitionFlash(elapsed: TimeInterval) -> some View {
+        let progress = QuotaIndicatorMotion.completionIgnitionProgress(
+            elapsed: elapsed
+        )
+        let opacity = QuotaIndicatorMotion.completionIgnitionOpacity(
+            progress: progress
+        )
+
+        return ZStack {
+            Circle()
+                .fill(Color.white.opacity(0.82))
+                .blur(radius: 0.7)
+
+            Circle()
+                .stroke(Color.white.opacity(0.96), lineWidth: 0.9)
+        }
+        .frame(
+            width: 5 + progress * 9,
+            height: 5 + progress * 9
+        )
+        .opacity(opacity)
+    }
+
+    private func particle(
+        spec: CompletionParticleSpec,
+        elapsed: TimeInterval
+    ) -> some View {
+        let progress = QuotaIndicatorMotion.completionParticleProgress(
+            elapsed: elapsed,
+            delay: spec.delay
+        )
+        let offset = QuotaIndicatorMotion.completionParticleOffset(
+            spec: spec,
+            progress: progress
+        )
+
+        let particleColor = toneColor(spec.tone)
+
+        return Circle()
+            .fill(particleColor)
+            .frame(width: spec.diameter, height: spec.diameter)
+            .scaleEffect(
+                QuotaIndicatorMotion.completionParticleScale(
+                    progress: progress
+                )
+            )
+            .offset(x: offset.width, y: offset.height)
+            .opacity(
+                QuotaIndicatorMotion.completionParticleOpacity(
+                    progress: progress
+                )
+            )
+            .shadow(
+                color: particleColor.opacity(spec.tone == .highlight ? 0.9 : 0.7),
+                radius: QuotaIndicatorMotion.completionParticleGlowRadius(
+                    tone: spec.tone
+                )
+            )
+    }
+
+    private func endpointSpark(
+        spec: CompletionSparkSpec,
+        elapsed: TimeInterval
+    ) -> some View {
+        let progress = QuotaIndicatorMotion.completionSparkProgress(
+            elapsed: elapsed,
+            delay: spec.delay
+        )
+        let offset = QuotaIndicatorMotion.completionSparkOffset(spec: spec)
+        let sparkColor = toneColor(spec.tone)
+
+        return CompletionSparkShape()
+            .fill(sparkColor)
+            .frame(width: spec.diameter, height: spec.diameter)
+            .scaleEffect(
+                QuotaIndicatorMotion.completionSparkScale(progress: progress)
+            )
+            .offset(x: offset.width, y: offset.height)
+            .opacity(
+                QuotaIndicatorMotion.completionSparkOpacity(progress: progress)
+            )
+            .shadow(
+                color: sparkColor.opacity(0.92),
+                radius: QuotaIndicatorMotion.completionSparkGlowRadius
+            )
+    }
+
+    private func toneColor(_ tone: CompletionParticleTone) -> Color {
+        switch tone {
+        case .success:
+            return color
+        case .highlight:
+            return Color.white.opacity(0.98)
+        case .coral:
+            return NotchPalette.completionCoral
+        }
+    }
+}
+
+private struct CompletionSparkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let inner = min(rect.width, rect.height) * 0.16
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+
+        var path = Path()
+        path.move(to: CGPoint(x: center.x, y: rect.minY))
+        path.addLine(to: CGPoint(x: center.x + inner, y: center.y - inner))
+        path.addLine(to: CGPoint(x: rect.maxX, y: center.y))
+        path.addLine(to: CGPoint(x: center.x + inner, y: center.y + inner))
+        path.addLine(to: CGPoint(x: center.x, y: rect.maxY))
+        path.addLine(to: CGPoint(x: center.x - inner, y: center.y + inner))
+        path.addLine(to: CGPoint(x: rect.minX, y: center.y))
+        path.addLine(to: CGPoint(x: center.x - inner, y: center.y - inner))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct QuotaValueText: View {
+    let value: String
+    let isAvailable: Bool
+    let fontSize: CGFloat
+
+    private var textColor: Color {
+        isAvailable ? NotchPalette.primaryText : NotchPalette.secondaryText
+    }
+
+    private var outlineColor: Color {
+        Color.black.opacity(isAvailable ? 0.88 : 0.56)
+    }
+
+    private var outlineOffset: CGFloat {
+        isAvailable ? 0.8 : 0.6
+    }
+
+    var body: some View {
+        Text(value)
+            .font(.system(
+                size: isAvailable ? fontSize : fontSize + 1,
+                weight: .bold,
+                design: .rounded
+            ))
+            .foregroundStyle(textColor)
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            // A text-only outline keeps the liquid fully visible while
+            // preserving contrast as the wave crosses behind each glyph.
+            .shadow(color: outlineColor, radius: 0.35, x: -outlineOffset, y: 0)
+            .shadow(color: outlineColor, radius: 0.35, x: outlineOffset, y: 0)
+            .shadow(color: outlineColor, radius: 0.35, x: 0, y: -outlineOffset)
+            .shadow(color: outlineColor, radius: 0.35, x: 0, y: outlineOffset)
+            .shadow(
+                color: .black.opacity(isAvailable ? 0.64 : 0.35),
+                radius: 1.15,
+                x: 0,
+                y: 0.4
+            )
+    }
+}
+
+private struct QuotaWaveBall: View {
+    let window: UsageWindow?
+    let activity: QuotaRingActivity
+    let diameter: CGFloat
+    let lineWidth: CGFloat
+    let fontSize: CGFloat
+
+    @Environment(\.notchMotionEnabled) private var motionEnabled
+    @State private var displayedProgress: CGFloat = 0
+
+    private var remainingPercent: Double {
+        window?.remainingPercent ?? 0
+    }
+
+    private var targetProgress: CGFloat {
+        CGFloat(min(max(remainingPercent, 0), 100) / 100)
+    }
+
+    private var progressColor: Color {
+        guard window != nil else { return NotchPalette.secondaryText }
+        return QuotaColorScale.color(for: remainingPercent)
+    }
+
+    private var progressColorComponents: QuotaColorScale.RGB {
+        QuotaColorScale.components(for: remainingPercent)
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(NotchPalette.track)
+
+            waveFill
+
+            Circle()
+                .strokeBorder(NotchPalette.border, lineWidth: lineWidth)
+
+            if QuotaIndicatorMotion.shouldShowCompletionFirework(
+                activity: activity,
+                motionEnabled: motionEnabled
+            ) {
+                QuotaCompletionParticles(
+                    color: NotchPalette.success,
+                    diameter: diameter
+                )
+            }
+
+            // The value uses glyph-only outlining: nothing masks the liquid.
+            QuotaValueText(
+                value: window.map { NotchText.quotaNumber($0.remainingPercent) } ?? "—",
+                isAvailable: window != nil,
+                fontSize: fontSize
+            )
+        }
+        .frame(width: diameter, height: diameter)
+        .onAppear {
+            updateProgress(forAppearance: true)
+            updateActivityAnimation()
+        }
+        .onChange(of: remainingPercent) { _, _ in
+            updateProgress()
+        }
+        .onChange(of: activity) { _, _ in
+            updateActivityAnimation()
+        }
+        .onChange(of: motionEnabled) { _, _ in
+            updateActivityAnimation()
+        }
+    }
+
+    @ViewBuilder
+    private var waveFill: some View {
+        QuotaWaveLayer(
+            color: progressColorComponents,
+            fillProgress: displayedProgress,
+            isAnimating: QuotaIndicatorMotion.shouldAnimate(
+                isTaskRunning: activity == .running,
+                motionEnabled: motionEnabled
+            ),
+            progressAnimationEnabled: motionEnabled
+        )
+        .clipShape(Circle())
+    }
+
+    private func updateProgress(forAppearance: Bool = false) {
+        if !motionEnabled {
+            displayedProgress = targetProgress
+        } else if forAppearance, activity == .running {
+            displayedProgress = 1
+            withAnimation(.easeOut(duration: 0.9)) {
+                displayedProgress = targetProgress
+            }
+        } else if forAppearance {
+            displayedProgress = targetProgress
+        } else {
+            withAnimation(.easeInOut(duration: 0.42)) {
+                displayedProgress = targetProgress
+            }
+        }
+    }
+
+    private func updateActivityAnimation() {
+        guard motionEnabled else {
+            displayedProgress = targetProgress
+            return
+        }
+
+        switch activity {
+        case .idle, .running:
+            updateProgress()
+        case .completed:
+            displayedProgress = targetProgress
+        }
+    }
+}
+
+private struct QuotaRing: View {
+    let style: QuotaDisplayStyle
+    let window: UsageWindow?
+    let activity: QuotaRingActivity
+    let diameter: CGFloat
+    let lineWidth: CGFloat
+    let fontSize: CGFloat
+
+    @Environment(\.notchMotionEnabled) private var motionEnabled
+    @State private var displayedProgress: CGFloat = 0
+
+    private var remainingPercent: Double {
+        window?.remainingPercent ?? 0
+    }
+
+    private var targetProgress: CGFloat {
+        CGFloat(min(max(remainingPercent, 0), 100) / 100)
+    }
+
+    private var progressColor: Color {
+        guard window != nil else { return NotchPalette.secondaryText }
+        return QuotaColorScale.color(for: remainingPercent)
+    }
+
+    private var progressColorComponents: QuotaColorScale.RGB {
+        QuotaColorScale.components(for: remainingPercent)
+    }
+
+    private var progressTrim: (from: CGFloat, to: CGFloat) {
+        switch style {
+        case .clockwiseRing:
+            // Keep the filled arc's end fixed at the 12 o'clock anchor. As
+            // the remaining quota drops, the gap grows clockwise from there.
+            return QuotaRingMath.clockwiseTrim(progress: displayedProgress)
+        case .waveBall:
+            return (0, displayedProgress)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(NotchPalette.track, lineWidth: lineWidth)
+
+            if window != nil {
+                quotaStroke
+
+                if QuotaInnerGlowMotion.shouldAnimate(
+                    activity: activity,
+                    hasQuota: window != nil,
+                    motionEnabled: motionEnabled
+                ) {
+                    QuotaGradientLayer(
+                        color: QuotaInnerGlowMotion.color,
+                        isAnimating: true,
+                        style: .innerGlow
+                    )
+                    .mask {
+                        Circle()
+                            .inset(by: QuotaInnerGlowMotion.strokeInset(quotaLineWidth: lineWidth))
+                            .stroke(Color.white, lineWidth: QuotaInnerGlowMotion.lineWidth)
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
+
+                if QuotaIndicatorMotion.shouldShowCompletionFirework(
+                    activity: activity,
+                    motionEnabled: motionEnabled
+                ) {
+                    QuotaCompletionParticles(
+                        color: NotchPalette.success,
+                        diameter: diameter
+                    )
+                }
+            }
+
+            QuotaValueText(
+                value: window.map { NotchText.quotaNumber($0.remainingPercent) } ?? "—",
+                isAvailable: window != nil,
+                fontSize: fontSize
+            )
+        }
+        .frame(width: diameter, height: diameter)
+        .onAppear {
+            updateProgress(forAppearance: true)
+            updateActivityAnimation()
+        }
+        .onChange(of: remainingPercent) { _, _ in
+            updateProgress()
+        }
+        .onChange(of: activity) { _, _ in
+            updateActivityAnimation()
+        }
+        .onChange(of: motionEnabled) { _, _ in
+            updateActivityAnimation()
+        }
+    }
+
+    @ViewBuilder
+    private var quotaStroke: some View {
+        switch QuotaRingAppearance.colorMode(
+            for: activity,
+            motionEnabled: motionEnabled
+        ) {
+        case .solid:
+            quotaArc(progressColor)
+        case .gradient:
+            QuotaGradientLayer(
+                color: progressColorComponents,
+                isAnimating: true
+            )
+            .mask {
+                quotaArc(Color.white)
+            }
+        }
+    }
+
+    private func quotaArc<S: ShapeStyle>(_ shapeStyle: S) -> some View {
+        Circle()
+            .inset(by: QuotaRingMath.containedStrokeInset(lineWidth: lineWidth))
+            .trim(from: progressTrim.from, to: progressTrim.to)
+            .stroke(
+                shapeStyle,
+                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+            )
+            .rotationEffect(.degrees(QuotaRingMath.clockwiseStartAngleDegrees))
+    }
+
+    private func updateProgress(forAppearance: Bool = false) {
+        guard window != nil else {
+            displayedProgress = 0
+            return
+        }
+        if !motionEnabled {
+            displayedProgress = targetProgress
+        } else if forAppearance, activity == .running {
+            displayedProgress = 1
+            withAnimation(.easeOut(duration: 0.9)) {
+                displayedProgress = targetProgress
+            }
+        } else if forAppearance {
+            displayedProgress = targetProgress
+        } else {
+            withAnimation(.easeInOut(duration: 0.42)) {
+                displayedProgress = targetProgress
+            }
+        }
+    }
+
+    private func updateActivityAnimation() {
+        guard motionEnabled else {
+            displayedProgress = targetProgress
+            return
+        }
+
+        switch activity {
+        case .idle:
+            updateProgress()
+        case .running:
+            displayedProgress = 1
+            withAnimation(.easeOut(duration: 0.9)) {
+                displayedProgress = targetProgress
+            }
+        case .completed:
+            displayedProgress = targetProgress
+        }
+    }
+}
+
+private struct ExpandedNotchView: View {
+    let content: ExpandedContent
+    let now: Date
+    let layoutMode: NotchLayoutMode
+    let cameraSafeAreaInset: CGFloat
+    let compactWidth: CGFloat
+    let compactHeight: CGFloat
+    let quotaDisplayStyle: QuotaDisplayStyle
+    let language: AppLanguage
+    let isResetScheduleExpanded: Bool
+    let resetUnreadCount: Int
+    let resetAwayUnreadCount: Int
+    let resetStatusText: String
+    let resetPreannouncements: [ResetAnnouncement]
+    let onOpenResetAnnouncements: () -> Void
+    let onActivateChatGPT: () -> Void
+    let onOpenThread: (String) -> Void
+    let onResetScheduleExpandedChanged: (Bool) -> Void
+    let notchDisplayEnabled: Bool
+    let onNotchDisplayEnabledChanged: (Bool) -> Void
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            detailContent
+
+            // Keep the original compact island visible at the top. The detail
+            // body is revealed underneath it as the panel's bottom edge grows.
+            CompactNotchView(
+                layoutMode: layoutMode,
+                compactHeight: compactHeight,
+                icon: headerIcon,
+                title: headerTitle,
+                subtitle: headerSubtitle,
+                usage: content.usage,
+                quotaDisplayStyle: quotaDisplayStyle,
+                resetUnreadCount: resetUnreadCount,
+                action: headerAction
+            )
+            .frame(
+                width: compactWidth,
+                height: compactHeight
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var detailContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ResetAnnouncementEntriesView(
+                unreadCount: resetUnreadCount,
+                awayUnreadCount: resetAwayUnreadCount,
+                statusText: resetStatusText,
+                announcements: resetPreannouncements,
+                now: now,
+                language: language,
+                action: onOpenResetAnnouncements
+            )
+            .padding(.bottom, 8)
+
+            QuotaWindowsProgressView(
+                usage: content.usage,
+                now: now,
+                isResetScheduleExpanded: isResetScheduleExpanded,
+                onResetScheduleExpandedChanged: onResetScheduleExpandedChanged
+            )
+
+            if !content.conversations.isEmpty {
+                Spacer(minLength: 8)
+
+                Rectangle()
+                    .fill(NotchPalette.border)
+                    .frame(height: 0.5)
+
+                Spacer(minLength: 8)
+
+                Text(language.localized(chinese: "最近对话", english: "Recent conversations"))
+                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(NotchPalette.secondaryText)
+
+                Spacer(minLength: 6)
+
+                VStack(spacing: 0) {
+                    ForEach(
+                        Array(content.conversations.enumerated()),
+                        id: \.offset
+                    ) { index, conversation in
+                        ConversationRowView(
+                            conversation: conversation,
+                            now: now,
+                            language: language,
+                            action: { onOpenThread(conversation.threadID) }
+                        )
+
+                        if index < content.conversations.count - 1 {
+                            Rectangle()
+                                .fill(NotchPalette.border)
+                                .frame(height: 0.5)
+                                .padding(.leading, 31)
+                        }
+                    }
+                }
+                .background(NotchPalette.row.opacity(0.62))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(NotchPalette.border, lineWidth: 0.5)
+                }
+            }
+
+            Spacer(minLength: 6)
+
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+
+                Toggle(
+                    isOn: Binding(
+                        get: { notchDisplayEnabled },
+                        set: onNotchDisplayEnabledChanged
+                    )
+                ) {
+                    HStack(spacing: 6) {
+                        Image(
+                            systemName: notchDisplayEnabled
+                                ? "eye.fill"
+                                : "eye.slash.fill"
+                        )
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(
+                            notchDisplayEnabled
+                                ? NotchPalette.success
+                                : NotchPalette.secondaryText
+                        )
+
+                        Text(
+                            notchDisplayEnabled
+                                ? displayOnLabel
+                                : displayOffLabel
+                        )
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(
+                            notchDisplayEnabled
+                                ? NotchPalette.primaryText
+                                : NotchPalette.secondaryText
+                        )
+                    }
+                    .padding(.horizontal, 9)
+                    .frame(height: 24)
+                    .background(
+                        notchDisplayEnabled
+                            ? NotchPalette.success.opacity(0.12)
+                            : NotchPalette.row.opacity(0.82),
+                        in: Capsule()
+                    )
+                    .overlay {
+                        Capsule()
+                            .stroke(
+                                notchDisplayEnabled
+                                    ? NotchPalette.success.opacity(0.32)
+                                    : NotchPalette.border,
+                                lineWidth: 0.75
+                            )
+                    }
+                }
+                .toggleStyle(.button)
+                .buttonStyle(NotchButtonStyle())
+                .accessibilityLabel(
+                    language.localized(
+                        chinese: layoutMode == .floatingBar ? "显示悬浮岛" : "显示刘海",
+                        english: layoutMode == .floatingBar ? "Show activity island" : "Show notch"
+                    )
+                )
+                .accessibilityValue(
+                    notchDisplayEnabled
+                        ? language.localized(chinese: "开启", english: "On")
+                        : language.localized(chinese: "关闭", english: "Off")
+                )
+
+                SettingsLink {
+                    Label(
+                        language.localized(chinese: "设置", english: "Settings"),
+                        systemImage: "gearshape"
+                    )
+                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(NotchPalette.secondaryText)
+                        .padding(.horizontal, 9)
+                        .frame(height: 24)
+                        .background(NotchPalette.row.opacity(0.82), in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(NotchPalette.border, lineWidth: 0.5)
+                        }
+                }
+                .buttonStyle(NotchButtonStyle())
+                .accessibilityLabel(
+                    language.localized(chinese: "打开设置", english: "Open settings")
+                )
+            }
+        }
+        .padding(.horizontal, 14)
+        // The panel itself attaches to the physical notch. Only the content
+        // moves down, so the progress bar and text stay on drawable pixels.
+        .padding(.top, expandedContentTopInset)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var displayOnLabel: String {
+        language.localized(
+            chinese: layoutMode == .floatingBar ? "悬浮岛开启" : "刘海开启",
+            english: layoutMode == .floatingBar ? "Activity island On" : "Notch On"
+        )
+    }
+
+    private var displayOffLabel: String {
+        language.localized(
+            chinese: layoutMode == .floatingBar ? "悬浮岛关闭" : "刘海关闭",
+            english: layoutMode == .floatingBar ? "Activity island Off" : "Notch Off"
+        )
+    }
+
+    private var expandedContentTopInset: CGFloat {
+        if layoutMode == .floatingBar {
+            return compactHeight + 8
+        }
+        return cameraSafeAreaInset + 8
+    }
+
+    private var headerIcon: CompactNotchView.IconKind {
+        if !content.sessions.isEmpty {
+            return .working
+        }
+        if content.headerConversation != nil {
+            return .completed
+        }
+        return .quota
+    }
+
+    private var headerTitle: String {
+        switch headerIcon {
+        case .working:
+            return NotchText.compactActivityTitle(
+                content.sessions.first?.title,
+                fallback: language.localized(
+                    chinese: "Codex 运行中",
+                    english: "Codex running"
+                )
+            )
+        case .completed:
+            return NotchText.compactActivityTitle(
+                content.headerConversation?.title,
+                fallback: language.localized(
+                    chinese: "Codex 已完成",
+                    english: "Codex completed"
+                )
+            )
+        case .quota:
+            return language.localized(chinese: "Codex 就绪", english: "Codex ready")
+        }
+    }
+
+    private var headerSubtitle: String {
+        if let session = content.sessions.first {
+            return NotchText.sessionSubtitle(session, now: now, language: language)
+        }
+        if let conversation = content.headerConversation {
+            return NotchText.projectName(cwd: conversation.cwd, language: language)
+        }
+        return NotchText.quotaSubtitle(usage: content.usage, language: language)
+    }
+
+    private var headerAction: () -> Void {
+        if let session = content.sessions.first {
+            return { onOpenThread(session.threadID) }
+        }
+        if let conversation = content.headerConversation {
+            return { onOpenThread(conversation.threadID) }
+        }
+        return onActivateChatGPT
+    }
+}
+
+private struct ConversationRowView: View {
+    let conversation: ConversationSummary
+    let now: Date
+    let language: AppLanguage
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                ConversationStatusView(activity: conversation.activity)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(
+                        conversation.title
+                            ?? NotchText.projectName(cwd: conversation.cwd, language: language)
+                    )
+                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(NotchPalette.primaryText)
+                        .lineLimit(1)
+                    Text(metadataText)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(NotchPalette.secondaryText)
+                        .lineLimit(1)
+                        .monospacedDigit()
+                }
+
+                Spacer(minLength: 4)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(NotchPalette.secondaryText)
+            }
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(NotchButtonStyle())
+    }
+
+    private var metadataText: String {
+        let project = NotchText.projectName(cwd: conversation.cwd, language: language)
+        switch conversation.activity {
+        case let .running(startedAt):
+            return language.localized(
+                chinese: "运行 \(NotchText.formatDuration(seconds: max(0, now.timeIntervalSince(startedAt)))) · \(project)",
+                english: "Running \(NotchText.formatDuration(seconds: max(0, now.timeIntervalSince(startedAt)))) · \(project)"
+            )
+        case let .completed(completedAt):
+            return language.localized(
+                chinese: "已完成 · \(NotchText.relativeTime(from: completedAt, now: now, language: language)) · \(project)",
+                english: "Completed · \(NotchText.relativeTime(from: completedAt, now: now, language: language)) · \(project)"
+            )
+        }
+    }
+}
+
+private struct ConversationStatusView: View {
+    let activity: ConversationActivity
+
+    var body: some View {
+        switch activity {
+        case .running:
+            RunningStatusDot()
+        case .completed:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(NotchPalette.success)
+        }
+    }
+}
+
+private struct RunningStatusDot: View {
+    @Environment(\.notchMotionEnabled) private var motionEnabled
+    @State private var isPulsing = false
+
+    var body: some View {
+        Circle()
+            .fill(NotchPalette.success)
+            .frame(width: 7, height: 7)
+            .scaleEffect(isPulsing ? 1.15 : 0.82)
+            .opacity(isPulsing ? 0.62 : 1)
+            .onAppear {
+                guard motionEnabled else { return }
+                isPulsing = true
+            }
+            .onChange(of: motionEnabled) { _, enabled in
+                isPulsing = enabled
+            }
+            .animation(
+                motionEnabled
+                    ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+                    : nil,
+                value: isPulsing
+            )
+    }
+}
+
+private struct QuotaWindowsProgressView: View {
+    let usage: UsageSnapshot?
+    let now: Date
+    let isResetScheduleExpanded: Bool
+    let onResetScheduleExpandedChanged: (Bool) -> Void
+    @Environment(\.notchAppLanguage) private var language
+
+    private var weeklyWindow: UsageWindow? {
+        usage?.weeklyWindow
+    }
+
+    private var fiveHourWindow: UsageWindow? {
+        usage?.fiveHourWindow
+    }
+
+    private var resetCredits: [ResetCredit] {
+        usage?.resetCredits ?? []
+    }
+
+    var body: some View {
+        VStack(spacing: 7) {
+            if let fiveHourWindow {
+                QuotaWindowProgressRow(
+                    kind: .rolling(hours: 5),
+                    window: fiveHourWindow,
+                    now: now
+                )
+            }
+
+            QuotaWindowProgressRow(
+                kind: .weekly,
+                window: weeklyWindow,
+                now: now
+            )
+
+            ResetScheduleDisclosure(
+                credits: resetCredits,
+                now: now,
+                isExpanded: isResetScheduleExpanded,
+                title: NotchText.resetCredits(usage: usage, language: language),
+                onExpandedChanged: onResetScheduleExpandedChanged
+            )
+        }
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .top)
+        .animation(.easeInOut(duration: 0.28), value: weeklyWindow?.remainingPercent ?? 0)
+        .animation(.easeInOut(duration: 0.28), value: fiveHourWindow?.remainingPercent ?? 0)
+    }
+}
+
+private struct QuotaWindowProgressRow: View {
+    let kind: UsageWindowKind
+    let window: UsageWindow?
+    let now: Date
+    @Environment(\.notchAppLanguage) private var language
+
+    private var progressColor: Color {
+        guard window != nil else { return NotchPalette.secondaryText }
+        return QuotaColorScale.color(for: window?.remainingPercent ?? 0)
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack {
+                Text(NotchText.quotaWindowTitle(kind, language: language))
+                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(NotchPalette.primaryText)
+
+                Spacer()
+
+                Text(window.map { NotchText.percent($0.remainingPercent) } ?? "—")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(progressColor)
+                    .monospacedDigit()
+            }
+
+            GeometryReader { proxy in
+                Capsule()
+                    .fill(NotchPalette.track)
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(progressColor)
+                            .frame(
+                                width: proxy.size.width * (window?.remainingPercent ?? 0) / 100
+                            )
+                    }
+            }
+            .frame(height: 6)
+
+            HStack(spacing: 8) {
+                Text(resetTimestampText)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(NotchPalette.secondaryText)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                Text(
+                    language.localized(
+                        chinese: "还剩 \(resetCountdownText)",
+                        english: "\(resetCountdownText) remaining"
+                    )
+                )
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(NotchPalette.secondaryText)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private var resetTimestampText: String {
+        guard let resetAt = window?.resetAt else {
+            return language.localized(
+                chinese: "重置时间暂不可用",
+                english: "Reset time unavailable"
+            )
+        }
+        return language.localized(
+            chinese: "重置于 \(NotchText.resetTimestamp(resetAt))",
+            english: "Resets at \(NotchText.resetTimestamp(resetAt))"
+        )
+    }
+
+    private var resetCountdownText: String {
+        guard let resetAt = window?.resetAt else {
+            return "--:--:--"
+        }
+        return NotchText.resetCountdown(
+            resetAt: resetAt,
+            now: now,
+            language: language
+        )
+    }
+}
+
+private struct ResetScheduleDisclosure: View {
+    let credits: [ResetCredit]
+    let now: Date
+    let isExpanded: Bool
+    let title: String
+    let onExpandedChanged: (Bool) -> Void
+    @Environment(\.notchAppLanguage) private var language
+
+    var body: some View {
+        VStack(spacing: NotchExpandedLayout.resetScheduleDetailSpacing) {
+            Button {
+                guard !credits.isEmpty else { return }
+                onExpandedChanged(!isExpanded)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.counterclockwise.circle.fill")
+                        .font(.system(size: 10.5, weight: .semibold))
+
+                    Text(title)
+                        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(1)
+
+                    Spacer(minLength: 4)
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+                .foregroundStyle(
+                    credits.isEmpty
+                        ? NotchPalette.secondaryText
+                        : NotchPalette.primaryText.opacity(0.82)
+                )
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                .background(
+                    credits.isEmpty
+                        ? NotchPalette.row.opacity(0.35)
+                        : NotchPalette.row.opacity(0.78),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(NotchPalette.border, lineWidth: 0.5)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(NotchButtonStyle())
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .accessibilityLabel(
+                language.localized(
+                    chinese: "重置次数：\(title)",
+                    english: "Reset credits: \(title)"
+                )
+            )
+            .accessibilityHint(
+                credits.isEmpty
+                    ? language.localized(
+                        chinese: "接口暂未返回重置券明细",
+                        english: "The service has not returned reset-credit details"
+                    )
+                    : language.localized(
+                        chinese: "点击展开或收起对应重置次数的到期时间",
+                        english: "Click to show or hide reset-credit expiry times"
+                    )
+            )
+
+            if isExpanded, !credits.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(credits.enumerated()), id: \.element.id) { index, credit in
+                        ResetScheduleRow(credit: credit, now: now, language: language)
+
+                        if index < credits.count - 1 {
+                            Rectangle()
+                                .fill(NotchPalette.border)
+                                .frame(height: NotchExpandedLayout.conversationSeparatorHeight)
+                        }
+                    }
+                }
+                .padding(.vertical, NotchExpandedLayout.resetScheduleDetailVerticalPadding)
+                .background(NotchPalette.row.opacity(0.62))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(NotchPalette.border, lineWidth: 0.5)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.22), value: isExpanded)
+    }
+}
+
+private struct ResetScheduleRow: View {
+    let credit: ResetCredit
+    let now: Date
+    let language: AppLanguage
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(NotchText.resetCreditExpiry(credit, language: language))
+                .monospacedDigit()
+                .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(NotchPalette.primaryText)
+
+            Spacer(minLength: 4)
+
+            Text(
+                credit.expiresAt.map {
+                    language.localized(
+                        chinese: "还剩 \(NotchText.resetCountdown(resetAt: $0, now: now, language: language))",
+                        english: "\(NotchText.resetCountdown(resetAt: $0, now: now, language: language)) remaining"
+                    )
+                } ?? "—"
+            )
+            .monospacedDigit()
+            .font(.system(size: 10.5, weight: .medium, design: .rounded))
+            .foregroundStyle(NotchPalette.secondaryText)
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: NotchExpandedLayout.resetScheduleRowHeight)
+    }
+}
+
+enum QuotaColorScale {
+    struct RGB: Equatable, Sendable {
+        let red: Double
+        let green: Double
+        let blue: Double
+    }
+
+    static func band(for remainingPercent: Double) -> WeeklyQuotaLevel {
+        WeeklyQuotaLevel(remainingPercent: remainingPercent)
+    }
+
+    static func components(for remainingPercent: Double) -> RGB {
+        switch band(for: remainingPercent) {
+        case .healthy:
+            return RGB(red: 0.29, green: 0.84, blue: 0.43)
+        case .warning:
+            return RGB(red: 1.0, green: 0.76, blue: 0.18)
+        case .critical:
+            return RGB(red: 0.86, green: 0.12, blue: 0.18)
+        case .unavailable:
+            return RGB(red: 0.86, green: 0.12, blue: 0.18)
+        }
+    }
+
+    static func color(for remainingPercent: Double) -> Color {
+        let components = components(for: remainingPercent)
+        return Color(
+            red: components.red,
+            green: components.green,
+            blue: components.blue
+        )
+    }
+}
+
+private enum NotchPalette {
+    static let background = Color.black
+    static let primaryText = Color.white
+    static let secondaryText = Color.white.opacity(0.6)
+    static let row = Color.white.opacity(0.09)
+    static let border = Color.white.opacity(0.1)
+    static let track = Color.white.opacity(0.13)
+    static let accent = Color(red: 0.38, green: 0.66, blue: 1.0)
+    static let warning = Color(red: 1.0, green: 0.68, blue: 0.28)
+    static let success = Color(red: 0.34, green: 0.88, blue: 0.55)
+    static let completionCoral = Color(red: 1.0, green: 0.31, blue: 0.22)
+    static let danger = Color(red: 1.0, green: 0.35, blue: 0.35)
+}
+
+private struct NotchButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+enum NotchText {
+    static func compactActivityTitle(
+        _ candidate: String?,
+        fallback: String
+    ) -> String {
+        guard let title = candidate?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ), !title.isEmpty else {
+            return fallback
+        }
+        return title
+    }
+
+    static func windowLabel(
+        _ kind: UsageWindowKind,
+        language: AppLanguage = .chinese
+    ) -> String {
+        switch kind {
+        case let .rolling(hours):
+            return language.localized(
+                chinese: "滚动 \(hours)h",
+                english: "Rolling \(hours)h"
+            )
+        case .daily:
+            return language.localized(chinese: "每日", english: "Daily")
+        case .weekly:
+            return language.localized(chinese: "每周", english: "Weekly")
+        case let .custom(seconds):
+            return formatDuration(seconds: seconds)
+        }
+    }
+
+    static func quotaWindowTitle(
+        _ kind: UsageWindowKind,
+        language: AppLanguage = .chinese
+    ) -> String {
+        switch kind {
+        case .weekly:
+            return language.localized(chinese: "本周剩余", english: "Weekly remaining")
+        case let .rolling(hours):
+            return language.localized(
+                chinese: "\(hours)h 剩余",
+                english: "\(hours)h remaining"
+            )
+        case .daily:
+            return language.localized(chinese: "每日剩余", english: "Daily remaining")
+        case let .custom(seconds):
+            return language.localized(
+                chinese: "\(formatDuration(seconds: seconds)) 剩余",
+                english: "\(formatDuration(seconds: seconds)) remaining"
+            )
+        }
+    }
+
+    static func compactWindow(
+        _ window: UsageWindow,
+        language: AppLanguage = .chinese
+    ) -> String {
+        language.localized(
+            chinese: "\(windowLabel(window.kind, language: language))余\(percent(window.remainingPercent))",
+            english: "\(windowLabel(window.kind, language: language)) \(percent(window.remainingPercent)) left"
+        )
+    }
+
+    static func percent(_ value: Double) -> String {
+        "\(Int(value.rounded()))%"
+    }
+
+    static func quotaNumber(_ value: Double) -> String {
+        "\(Int(value.rounded()))"
+    }
+
+    static func quotaSubtitle(
+        usage: UsageSnapshot?,
+        language: AppLanguage = .chinese
+    ) -> String {
+        guard let usage else {
+            return language.localized(
+                chinese: "额度暂不可用",
+                english: "Quota unavailable"
+            )
+        }
+
+        var windows: [UsageWindow] = []
+        if let weeklyWindow = usage.weeklyWindow {
+            windows.append(weeklyWindow)
+        }
+        if let fiveHourWindow = usage.fiveHourWindow,
+           !windows.contains(where: { $0.id == fiveHourWindow.id }) {
+            windows.append(fiveHourWindow)
+        }
+        if windows.isEmpty, let firstWindow = usage.windows.first {
+            windows.append(firstWindow)
+        }
+        guard !windows.isEmpty else {
+            return language.localized(
+                chinese: "额度暂不可用",
+                english: "Quota unavailable"
+            )
+        }
+
+        return windows
+            .map { quotaWindowSummary($0, language: language) }
+            .joined(separator: " · ")
+    }
+
+    private static func quotaWindowSummary(
+        _ window: UsageWindow,
+        language: AppLanguage
+    ) -> String {
+        let remaining = percent(window.remainingPercent)
+        let used = percent(window.usedPercent)
+        switch window.kind {
+        case .weekly:
+            return language.localized(
+                chinese: "每周剩余 \(remaining) · 已用 \(used)",
+                english: "Weekly \(remaining) remaining · \(used) used"
+            )
+        case let .rolling(hours):
+            return language.localized(
+                chinese: "\(hours)h 剩余 \(remaining) · 已用 \(used)",
+                english: "\(hours)h \(remaining) remaining · \(used) used"
+            )
+        case .daily:
+            return language.localized(
+                chinese: "每日剩余 \(remaining) · 已用 \(used)",
+                english: "Daily \(remaining) remaining · \(used) used"
+            )
+        case let .custom(seconds):
+            let label = formatDuration(seconds: seconds)
+            return language.localized(
+                chinese: "\(label) 剩余 \(remaining) · 已用 \(used)",
+                english: "\(label) \(remaining) remaining · \(used) used"
+            )
+        }
+    }
+
+    static func resetCredits(
+        usage: UsageSnapshot?,
+        language: AppLanguage = .chinese
+    ) -> String {
+        guard let credits = usage?.resetCreditsAvailable else {
+            return language.localized(chinese: "重置 —", english: "Resets —")
+        }
+        return language.localized(
+            chinese: "可重置 \(credits) 次",
+            english: "\(credits) resets available"
+        )
+    }
+
+    static func resetCreditTitle(
+        _ credit: ResetCredit,
+        language: AppLanguage = .chinese
+    ) -> String {
+        let title = credit.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return title.isEmpty
+            ? language.localized(chinese: "使用限额重置", english: "Usage reset")
+            : title
+    }
+
+    static func resetCreditExpiry(
+        _ credit: ResetCredit,
+        timeZone: TimeZone = .current,
+        language: AppLanguage = .chinese
+    ) -> String {
+        guard let expiresAt = credit.expiresAt else {
+            return language.localized(
+                chinese: "到期时间暂不可用",
+                english: "Expiry unavailable"
+            )
+        }
+        return language.localized(
+            chinese: "到期 \(resetTimestamp(expiresAt, timeZone: timeZone))",
+            english: "Expires \(resetTimestamp(expiresAt, timeZone: timeZone))"
+        )
+    }
+
+    static func sessionSubtitle(
+        _ session: SessionActivity,
+        now: Date,
+        language: AppLanguage = .chinese
+    ) -> String {
+        language.localized(
+            chinese: "\(projectName(cwd: session.cwd, language: language)) · 已运行 \(formatDuration(seconds: max(0, now.timeIntervalSince(session.startedAt))))",
+            english: "\(projectName(cwd: session.cwd, language: language)) · Running for \(formatDuration(seconds: max(0, now.timeIntervalSince(session.startedAt))))"
+        )
+    }
+
+    static func projectName(
+        cwd: String?,
+        language: AppLanguage = .chinese
+    ) -> String {
+        guard let cwd, !cwd.isEmpty else {
+            return language.localized(chinese: "未命名任务", english: "Unnamed task")
+        }
+        let name = URL(fileURLWithPath: cwd).lastPathComponent
+        return name.isEmpty ? cwd : name
+    }
+
+    static func relativeTime(
+        from date: Date,
+        now: Date,
+        language: AppLanguage = .chinese
+    ) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(date).rounded(.down)))
+        if seconds < 60 {
+            return language.localized(chinese: "刚刚", english: "just now")
+        }
+        if seconds < 3_600 {
+            return language.localized(
+                chinese: "\(seconds / 60)分钟前",
+                english: "\(seconds / 60)m ago"
+            )
+        }
+        if seconds < 86_400 {
+            return language.localized(
+                chinese: "\(seconds / 3_600)小时前",
+                english: "\(seconds / 3_600)h ago"
+            )
+        }
+        return language.localized(
+            chinese: "\(seconds / 86_400)天前",
+            english: "\(seconds / 86_400)d ago"
+        )
+    }
+
+    static func formatDuration(seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded(.down)))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let remainingSeconds = total % 60
+
+        if hours > 0 {
+            return String(format: "%02d:%02d:%02d", hours, minutes, remainingSeconds)
+        }
+        return String(format: "%02d:%02d", minutes, remainingSeconds)
+    }
+
+    static func resetTimestamp(
+        _ date: Date,
+        timeZone: TimeZone = .current
+    ) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: date)
+    }
+
+    static func resetCountdown(
+        resetAt: Date,
+        now: Date,
+        language: AppLanguage = .chinese
+    ) -> String {
+        let total = max(0, Int(resetAt.timeIntervalSince(now).rounded(.down)))
+        let days = total / 86_400
+        let hours = (total % 86_400) / 3_600
+        let minutes = (total % 3_600) / 60
+        let seconds = total % 60
+
+        if days > 0 {
+            return language.localized(
+                chinese: String(format: "%d天 %02d:%02d:%02d", days, hours, minutes, seconds),
+                english: String(format: "%dd %02d:%02d:%02d", days, hours, minutes, seconds)
+            )
+        }
+        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
+    private static func formatDuration(seconds: Int) -> String {
+        formatDuration(seconds: TimeInterval(seconds))
+    }
+}

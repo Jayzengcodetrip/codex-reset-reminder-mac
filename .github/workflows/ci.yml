@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check behavior contracts
+        run: ./scripts/check_contracts.sh
+      - name: Run tests and build app
+        run: ./scripts/verify.sh
+      - name: Check reset and window behavior
+        run: |
+          dist/CodexNotch.app/Contents/MacOS/CodexNotch --verify-reset-behavior
+          dist/CodexNotch.app/Contents/MacOS/CodexNotch --verify-window-restoration

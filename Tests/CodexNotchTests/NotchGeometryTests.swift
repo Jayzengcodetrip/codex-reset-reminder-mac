@@ -1,0 +1,381 @@
+import AppKit
+import XCTest
+@testable import CodexNotch
+
+final class NotchGeometryTests: XCTestCase {
+    func testIndicatorLanesKeepIconCentersSymmetricWithoutWideningTheIsland() {
+        let visualCenterWidth = NotchCompactLayout.minimumWidth
+            - NotchCompactLayout.indicatorLaneWidth * 2
+        let centeredIndicatorCameraClearance = NotchCompactLayout.sideExtensionWidth
+            - (NotchCompactLayout.indicatorLaneWidth + NotchCompactLayout.indicatorDiameter) / 2
+        let quotaIndicatorCameraClearance = centeredIndicatorCameraClearance
+            + NotchCompactLayout.quotaIndicatorOutwardOffset
+        let leftIndicatorCenterDistance = centeredIndicatorCameraClearance
+            + NotchCompactLayout.indicatorDiameter / 2
+        let rightIndicatorCenterDistance = quotaIndicatorCameraClearance
+            + NotchCompactLayout.indicatorDiameter / 2
+
+        XCTAssertEqual(NotchCompactLayout.sideExtensionWidth, 36, accuracy: 0.1)
+        XCTAssertEqual(NotchCompactLayout.indicatorLaneWidth, 46, accuracy: 0.1)
+        XCTAssertEqual(NotchCompactLayout.minimumWidth, 257, accuracy: 0.1)
+        XCTAssertEqual(visualCenterWidth, 165, accuracy: 0.1)
+        XCTAssertEqual(NotchCompactLayout.quotaIndicatorOutwardOffset, 0, accuracy: 0.1)
+        XCTAssertEqual(centeredIndicatorCameraClearance, 2, accuracy: 0.1)
+        XCTAssertEqual(quotaIndicatorCameraClearance, 2, accuracy: 0.1)
+        XCTAssertEqual(leftIndicatorCenterDistance, 13, accuracy: 0.1)
+        XCTAssertEqual(rightIndicatorCenterDistance, 13, accuracy: 0.1)
+        XCTAssertEqual(
+            leftIndicatorCenterDistance,
+            rightIndicatorCenterDistance,
+            accuracy: 0.1
+        )
+        XCTAssertEqual(
+            NotchCompactLayout.quotaIndicatorCameraClearance,
+            2,
+            accuracy: 0.1
+        )
+        XCTAssertEqual(
+            NotchCompactLayout.quotaIndicatorScreenEdgeClearance,
+            12,
+            accuracy: 0.1
+        )
+    }
+
+    func testCompactWingsStayCloseToTheCameraCutoutWithoutCrowdingIndicators() {
+        let metrics = NotchScreenMetrics(
+            frame: NSRect(x: 0, y: 0, width: 1512, height: 982),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1512, height: 949),
+            safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0),
+            auxiliaryTopLeftArea: NSRect(x: 0, y: 950, width: 663, height: 32),
+            auxiliaryTopRightArea: NSRect(x: 848, y: 950, width: 664, height: 32)
+        )
+
+        let layout = NotchGeometry.layout(metrics: metrics)
+        let cameraCutoutWidth = 185.0
+
+        XCTAssertEqual(NotchCompactLayout.sideExtensionWidth, 36, accuracy: 0.1)
+        XCTAssertGreaterThan(
+            NotchCompactLayout.sideExtensionWidth,
+            NotchCompactLayout.indicatorDiameter
+        )
+        XCTAssertEqual(
+            layout.compactFrame.width,
+            cameraCutoutWidth + NotchCompactLayout.sideExtensionWidth * 2,
+            accuracy: 0.1
+        )
+    }
+
+    func testCompactFrameIsCenteredBetweenAuxiliaryAreas() {
+        let metrics = NotchScreenMetrics(
+            frame: NSRect(x: 0, y: 0, width: 3024, height: 1964),
+            visibleFrame: NSRect(x: 0, y: 0, width: 3024, height: 1964),
+            safeAreaInsets: NSEdgeInsets(top: 74, left: 0, bottom: 0, right: 0),
+            auxiliaryTopLeftArea: NSRect(x: 0, y: 1900, width: 600, height: 64),
+            auxiliaryTopRightArea: NSRect(x: 2424, y: 1900, width: 600, height: 64)
+        )
+
+        let layout = NotchGeometry.layout(
+            metrics: metrics,
+            compactSize: NSSize(width: 420, height: 42),
+            expandedSize: NSSize(width: 720, height: 180)
+        )
+
+        XCTAssertEqual(layout.mode, .notch)
+        XCTAssertEqual(layout.hoverSensorFrame.midX, 1512, accuracy: 0.1)
+        XCTAssertEqual(layout.compactFrame.midX, 1512, accuracy: 0.1)
+        XCTAssertEqual(layout.quotaExpandedFrame.midX, 1512, accuracy: 0.1)
+        XCTAssertEqual(layout.expandedFrame.midX, 1512, accuracy: 0.1)
+    }
+
+    func testPhysicalNotchGeometryTracksChangedDisplayMetrics() {
+        let original = NotchGeometry.layout(metrics: NotchScreenMetrics(
+            frame: NSRect(x: 0, y: 0, width: 1512, height: 982),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1512, height: 949),
+            safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0),
+            auxiliaryTopLeftArea: NSRect(x: 0, y: 950, width: 663, height: 32),
+            auxiliaryTopRightArea: NSRect(x: 848, y: 950, width: 664, height: 32)
+        ))
+        let changed = NotchGeometry.layout(metrics: NotchScreenMetrics(
+            frame: NSRect(x: 0, y: 0, width: 1352, height: 878),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1352, height: 848),
+            safeAreaInsets: NSEdgeInsets(top: 29, left: 0, bottom: 0, right: 0),
+            auxiliaryTopLeftArea: NSRect(x: 0, y: 849, width: 593, height: 29),
+            auxiliaryTopRightArea: NSRect(x: 759, y: 849, width: 593, height: 29)
+        ))
+
+        XCTAssertEqual(original.mode, .notch)
+        XCTAssertEqual(changed.mode, .notch)
+        XCTAssertEqual(original.compactFrame.midX, 755.5, accuracy: 0.1)
+        XCTAssertEqual(changed.compactFrame.midX, 676, accuracy: 0.1)
+        XCTAssertEqual(changed.compactFrame.maxY, 878, accuracy: 0.1)
+        XCTAssertNotEqual(original.compactFrame.midX, changed.compactFrame.midX)
+    }
+
+    func testExpandedFrameAttachesToTopAndReservesCameraHeight() {
+        let metrics = NotchScreenMetrics(
+            frame: NSRect(x: 0, y: 0, width: 1200, height: 800),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1200, height: 800),
+            safeAreaInsets: NSEdgeInsets(top: 40, left: 0, bottom: 0, right: 0),
+            auxiliaryTopLeftArea: NSRect(x: 0, y: 760, width: 200, height: 40),
+            auxiliaryTopRightArea: NSRect(x: 1000, y: 760, width: 200, height: 40)
+        )
+
+        let layout = NotchGeometry.layout(
+            metrics: metrics,
+            compactSize: NSSize(width: 420, height: 42),
+            expandedSize: NSSize(width: 1600, height: 180)
+        )
+
+        XCTAssertGreaterThanOrEqual(layout.expandedFrame.minX, metrics.visibleFrame.minX)
+        XCTAssertLessThanOrEqual(layout.expandedFrame.maxX, metrics.visibleFrame.maxX)
+        XCTAssertEqual(layout.expandedFrame.maxY, metrics.frame.maxY, accuracy: 0.1)
+        XCTAssertEqual(layout.expandedFrame.height, 220, accuracy: 0.1)
+    }
+
+    func testReadableExpandedContentKeepsCompactFrameAtTheNotchGap() {
+        let metrics = NotchScreenMetrics(
+            frame: NSRect(x: 0, y: 0, width: 1512, height: 982),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1512, height: 949),
+            safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0),
+            auxiliaryTopLeftArea: NSRect(x: 0, y: 950, width: 663, height: 32),
+            auxiliaryTopRightArea: NSRect(x: 848, y: 950, width: 664, height: 32)
+        )
+
+        let layout = NotchGeometry.layout(metrics: metrics)
+
+        XCTAssertEqual(layout.mode, .notch)
+        XCTAssertEqual(layout.hoverSensorFrame.minX, 663, accuracy: 0.1)
+        XCTAssertEqual(layout.hoverSensorFrame.width, 185, accuracy: 0.1)
+        XCTAssertEqual(layout.hoverSensorFrame.height, 32, accuracy: 0.1)
+        XCTAssertEqual(layout.hoverSensorFrame.maxY, 982, accuracy: 0.1)
+        XCTAssertEqual(layout.compactFrame.width, 257, accuracy: 0.1)
+        XCTAssertEqual(layout.compactFrame.height, 32, accuracy: 0.1)
+        XCTAssertEqual(layout.compactFrame.midX, 755.5, accuracy: 0.1)
+        XCTAssertEqual(layout.compactFrame.maxY, 982, accuracy: 0.1)
+        XCTAssertEqual(layout.quotaExpandedFrame.width, 420, accuracy: 0.1)
+        XCTAssertEqual(layout.quotaExpandedFrame.height, 202, accuracy: 0.1)
+        XCTAssertEqual(layout.quotaExpandedFrame.maxY, 982, accuracy: 0.1)
+        XCTAssertEqual(layout.expandedFrame.width, 420, accuracy: 0.1)
+        XCTAssertEqual(layout.expandedFrame.height, 322, accuracy: 0.1)
+        XCTAssertEqual(layout.expandedFrame.maxY, 982, accuracy: 0.1)
+    }
+
+    func testConversationCountOnlyExtendsTheCardBelowTheNotchAnchor() {
+        let metrics = NotchScreenMetrics(
+            frame: NSRect(x: 0, y: 0, width: 1512, height: 982),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1512, height: 949),
+            safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0),
+            auxiliaryTopLeftArea: NSRect(x: 0, y: 950, width: 663, height: 32),
+            auxiliaryTopRightArea: NSRect(x: 848, y: 950, width: 664, height: 32)
+        )
+        let oneConversationLayout = NotchGeometry.layout(
+            metrics: metrics,
+            expandedSize: NotchExpandedLayout.taskContentSize(conversationCount: 1)
+        )
+        let fiveConversationLayout = NotchGeometry.layout(
+            metrics: metrics,
+            expandedSize: NotchExpandedLayout.taskContentSize(conversationCount: 5)
+        )
+
+        XCTAssertEqual(
+            oneConversationLayout.compactFrame.maxY,
+            oneConversationLayout.expandedFrame.maxY,
+            accuracy: 0.1
+        )
+        XCTAssertEqual(
+            fiveConversationLayout.compactFrame.maxY,
+            fiveConversationLayout.expandedFrame.maxY,
+            accuracy: 0.1
+        )
+        XCTAssertGreaterThan(
+            fiveConversationLayout.expandedFrame.height,
+            oneConversationLayout.expandedFrame.height
+        )
+        XCTAssertLessThan(
+            fiveConversationLayout.expandedFrame.minY,
+            oneConversationLayout.expandedFrame.minY
+        )
+    }
+
+    func testResetScheduleExpansionOnlyExtendsBelowTheNotchAnchor() {
+        let metrics = NotchScreenMetrics(
+            frame: NSRect(x: 0, y: 0, width: 1512, height: 982),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1512, height: 949),
+            safeAreaInsets: NSEdgeInsets(top: 32, left: 0, bottom: 0, right: 0),
+            auxiliaryTopLeftArea: NSRect(x: 0, y: 950, width: 663, height: 32),
+            auxiliaryTopRightArea: NSRect(x: 848, y: 950, width: 664, height: 32)
+        )
+        let collapsed = NotchGeometry.layout(metrics: metrics)
+        let expanded = NotchGeometry.layout(
+            metrics: metrics,
+            quotaExpandedSize: NotchExpandedLayout.quotaContentSize(
+                isResetScheduleExpanded: true,
+                resetCreditCount: 2
+            ),
+            expandedSize: NotchExpandedLayout.taskContentSize(
+                conversationCount: 2,
+                isResetScheduleExpanded: true,
+                resetCreditCount: 2
+            )
+        )
+
+        XCTAssertEqual(collapsed.quotaExpandedFrame.maxY, expanded.quotaExpandedFrame.maxY, accuracy: 0.1)
+        XCTAssertGreaterThan(expanded.quotaExpandedFrame.height, collapsed.quotaExpandedFrame.height)
+        XCTAssertLessThan(expanded.quotaExpandedFrame.minY, collapsed.quotaExpandedFrame.minY)
+        XCTAssertEqual(collapsed.expandedFrame.maxY, expanded.expandedFrame.maxY, accuracy: 0.1)
+        XCTAssertGreaterThan(expanded.expandedFrame.height, collapsed.expandedFrame.height)
+    }
+
+    func testFiveResetCreditsReserveFiveRowsInsideThePreparedCanvas() {
+        let twoCredits = NotchExpandedLayout.quotaContentSize(
+            isResetScheduleExpanded: true,
+            resetCreditCount: 2
+        )
+        let fiveCredits = NotchExpandedLayout.quotaContentSize(
+            isResetScheduleExpanded: true,
+            resetCreditCount: 5
+        )
+
+        XCTAssertEqual(
+            fiveCredits.height - twoCredits.height,
+            3 * (NotchExpandedLayout.resetScheduleRowHeight + NotchExpandedLayout.conversationSeparatorHeight),
+            accuracy: 0.1
+        )
+    }
+
+    func testFiveHourQuotaReservesOneAdditionalExpandedQuotaRow() {
+        let weeklyOnly = NotchExpandedLayout.quotaContentSize()
+        let weeklyAndFiveHour = NotchExpandedLayout.quotaContentSize(
+            hasFiveHourWindow: true
+        )
+        let taskWeeklyOnly = NotchExpandedLayout.taskContentSize(
+            conversationCount: 2
+        )
+        let taskWeeklyAndFiveHour = NotchExpandedLayout.taskContentSize(
+            conversationCount: 2,
+            hasFiveHourWindow: true
+        )
+
+        XCTAssertEqual(
+            weeklyAndFiveHour.height - weeklyOnly.height,
+            NotchExpandedLayout.fiveHourQuotaContentHeight,
+            accuracy: 0.1
+        )
+        XCTAssertEqual(
+            taskWeeklyAndFiveHour.height - taskWeeklyOnly.height,
+            NotchExpandedLayout.fiveHourQuotaContentHeight,
+            accuracy: 0.1
+        )
+    }
+
+    func testFrameInterpolationStartsWithCompactIslandAndKeepsTopEdgeFixed() {
+        let compactFrame = NSRect(x: 612, y: 950, width: 289, height: 32)
+        let expandedFrame = NSRect(x: 546.5, y: 774, width: 420, height: 208)
+
+        let start = NotchTopAnchoredFrameInterpolator.frame(
+            from: compactFrame,
+            to: expandedFrame,
+            progress: 0
+        )
+        let middle = NotchTopAnchoredFrameInterpolator.frame(
+            from: compactFrame,
+            to: expandedFrame,
+            progress: 0.5
+        )
+        let end = NotchTopAnchoredFrameInterpolator.frame(
+            from: compactFrame,
+            to: expandedFrame,
+            progress: 1
+        )
+
+        XCTAssertEqual(start, compactFrame)
+        XCTAssertEqual(end, expandedFrame)
+        XCTAssertEqual(middle.maxY, compactFrame.maxY, accuracy: 0.001)
+        XCTAssertEqual(middle.maxY, expandedFrame.maxY, accuracy: 0.001)
+        XCTAssertEqual(middle.midX, compactFrame.midX, accuracy: 0.001)
+        XCTAssertGreaterThan(middle.height, compactFrame.height)
+        XCTAssertLessThan(middle.height, expandedFrame.height)
+    }
+
+    func testMissingAuxiliaryAreasUseCompactIslandAttachedToScreenTop() {
+        let metrics = NotchScreenMetrics(
+            frame: NSRect(x: 0, y: 0, width: 1920, height: 1080),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1920, height: 1055),
+            safeAreaInsets: NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0),
+            auxiliaryTopLeftArea: nil,
+            auxiliaryTopRightArea: nil
+        )
+
+        let layout = NotchGeometry.layout(metrics: metrics)
+
+        XCTAssertEqual(layout.mode, .floatingBar)
+        XCTAssertEqual(layout.centerX, metrics.visibleFrame.midX, accuracy: 0.1)
+        XCTAssertEqual(layout.compactFrame.midX, metrics.visibleFrame.midX, accuracy: 0.1)
+        XCTAssertEqual(
+            layout.compactFrame.width,
+            NotchFloatingBarLayout.compactWidth,
+            accuracy: 0.1
+        )
+        XCTAssertEqual(
+            NotchFloatingBarLayout.compactWidth,
+            NotchFloatingBarLayout.contentWidth,
+            accuracy: 0.1
+        )
+        XCTAssertLessThan(layout.compactFrame.width, NotchCompactLayout.minimumWidth)
+        XCTAssertEqual(layout.compactFrame.height, 25, accuracy: 0.1)
+        XCTAssertEqual(layout.compactFrame.maxY, metrics.frame.maxY, accuracy: 0.1)
+        XCTAssertEqual(layout.expandedFrame.maxY, layout.compactFrame.maxY, accuracy: 0.1)
+        XCTAssertEqual(layout.quotaExpandedFrame.maxY, layout.compactFrame.maxY, accuracy: 0.1)
+        XCTAssertEqual(
+            layout.expandedFrame.height,
+            NotchExpandedLayout.twoConversationContentHeight
+                + layout.compactFrame.height,
+            accuracy: 0.1
+        )
+        XCTAssertEqual(layout.hoverSensorFrame, layout.compactFrame)
+        XCTAssertEqual(layout.frame(for: .hidden), layout.compactFrame)
+        XCTAssertLessThanOrEqual(layout.expandedFrame.maxX, metrics.visibleFrame.maxX)
+        XCTAssertGreaterThanOrEqual(layout.expandedFrame.minX, metrics.visibleFrame.minX)
+    }
+
+    func testNoNotchIslandUsesACompactFallbackWhenTheMenuBarIsAutoHidden() {
+        let metrics = NotchScreenMetrics(
+            frame: NSRect(x: 0, y: 0, width: 1920, height: 1080),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1920, height: 1080),
+            safeAreaInsets: NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0),
+            auxiliaryTopLeftArea: nil,
+            auxiliaryTopRightArea: nil
+        )
+
+        let layout = NotchGeometry.layout(metrics: metrics)
+
+        XCTAssertEqual(
+            layout.compactFrame.height,
+            NotchFloatingBarLayout.autoHiddenMenuBarHeight,
+            accuracy: 0.1
+        )
+        XCTAssertEqual(layout.compactFrame.maxY, metrics.frame.maxY, accuracy: 0.1)
+    }
+
+    func testNoNotchBattleLaneIsCenteredBetweenSymmetricIndicators() {
+        let leftIndicatorCenter = NotchFloatingBarLayout.horizontalInset
+            + NotchFloatingBarLayout.appLaneWidth / 2
+        let battleCenter = NotchFloatingBarLayout.horizontalInset
+            + NotchFloatingBarLayout.appLaneWidth
+            + NotchFloatingBarLayout.battleLaneWidth / 2
+        let rightIndicatorCenter = NotchFloatingBarLayout.compactWidth
+            - NotchFloatingBarLayout.horizontalInset
+            - NotchFloatingBarLayout.quotaLaneWidth / 2
+
+        XCTAssertEqual(
+            battleCenter,
+            NotchFloatingBarLayout.compactWidth / 2,
+            accuracy: 0.1
+        )
+        XCTAssertEqual(
+            battleCenter - leftIndicatorCenter,
+            rightIndicatorCenter - battleCenter,
+            accuracy: 0.1
+        )
+    }
+}

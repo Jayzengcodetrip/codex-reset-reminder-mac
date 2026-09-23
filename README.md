@@ -22,6 +22,8 @@ The app checks the public source on launch and roughly every **two minutes** whi
 3. Sign in to Codex on that Mac, then launch the app. It reads `~/.codex/auth.json` by default; a nonstandard Codex directory can be selected with `CODEX_HOME` before launch.
 4. Allow notifications if you want desktop banners. The app offers a test notification. Launch at login is enabled by default and can be turned off in its settings; macOS may require approval under **System Settings → General → Login Items & Extensions**.
 
+If you run the upstream CodexNotch or an earlier local build, quit it before launching this edition to avoid duplicate reminders. This edition has its own bundle identifier, so display preferences and login-item settings may need to be set again.
+
 No Xcode or Swift installation is required for the downloaded app.
 
 The current build is **ad-hoc signed, not Apple Developer ID signed or notarized**. If macOS blocks the first launch, verify that the file came from this repository's Release (the release includes `.sha256` checksums), try opening it, then use **System Settings → Privacy & Security → Open Anyway** and confirm. Do not disable macOS security checks globally. See [Apple's instructions](https://support.apple.com/en-gb/102445).
