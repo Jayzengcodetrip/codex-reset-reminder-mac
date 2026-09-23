@@ -40,8 +40,8 @@ struct ResetAnnouncementSummary: Equatable {
 
     static func headline(for announcement: ResetAnnouncement, now: Date, language: AppLanguage) -> String {
         let countdown = countdownText(for: announcement, now: now, language: language)
-        if isTerminal(announcement)
-            || ResetScheduleTiming.target(for: announcement).map({ $0.countdownDeadline <= now }) == true {
+        let phase = ResetScheduleTiming.phase(for: announcement, now: now)
+        if isTerminal(announcement) || phase == .afterDate || phase == .afterExact {
             return countdown
         }
         return language.localized(chinese: "临时重置 · \(countdown)", english: "Temporary reset · \(countdown)")
@@ -55,30 +55,42 @@ struct ResetAnnouncementSummary: Equatable {
         if completedStatuses.contains(state) {
             return language.localized(chinese: "来源已确认重置完成", english: "Source confirms reset completed")
         }
-        guard let target = ResetScheduleTiming.target(for: announcement) else {
+        guard let phase = ResetScheduleTiming.phase(for: announcement, now: now) else {
             return language.localized(chinese: "时间待公布", english: "Time not announced")
         }
-        let deadline = target.countdownDeadline
-        guard deadline > now else {
+        if phase == .afterDate {
+            return language.localized(chinese: "预告日已过 · 等待确认", english: "Announced day passed · Awaiting confirmation")
+        }
+        guard let deadline = phase.countdownDeadline else {
             return language.localized(chinese: "预计时间已过 · 等待确认", english: "Expected time passed · Awaiting confirmation")
         }
         let remaining = max(1, Int(ceil(deadline.timeIntervalSince(now))))
         let days = remaining / 86_400
-        let hours = remaining % 86_400 / 3_600
+        let hours = phase == .duringDate(deadline) ? remaining / 3_600 : remaining % 86_400 / 3_600
         let minutes = remaining % 3_600 / 60
         let seconds = remaining % 60
         if language == .chinese {
-            let dayText = days > 0 ? "\(days)天" : ""
-            let prefix = target.isDateBoundaryEstimate ? "预计还剩 " : "还剩 "
+            let dayText = days > 0 && phase != .duringDate(deadline) ? "\(days)天" : ""
+            let prefix: String
+            switch phase {
+            case .beforeDate: prefix = "距预告日开始还剩 "
+            case .duringDate: prefix = "预告日内还剩 "
+            default: prefix = "还剩 "
+            }
             return "\(prefix)\(dayText)\(hours)小时\(minutes)分\(seconds)秒"
         }
-        let dayText = days > 0 ? "\(days)d " : ""
-        let prefix = target.isDateBoundaryEstimate ? "Estimated " : ""
+        let dayText = days > 0 && phase != .duringDate(deadline) ? "\(days)d " : ""
+        let prefix: String
+        switch phase {
+        case .beforeDate: prefix = "Until announced day: "
+        case .duringDate: prefix = "In announced day: "
+        default: prefix = ""
+        }
         return "\(prefix)\(dayText)\(hours)h \(minutes)m \(seconds)s left"
     }
 
-    static func scheduleText(for announcement: ResetAnnouncement, language: AppLanguage) -> String {
-        ResetScheduleTiming.targetText(for: announcement, language: language)
+    static func scheduleText(for announcement: ResetAnnouncement, now: Date, language: AppLanguage) -> String {
+        ResetScheduleTiming.targetText(for: announcement, now: now, language: language)
     }
 
     private static let completedStatuses: Set<String> = ["completed", "confirmed", "propagated"]
@@ -142,7 +154,7 @@ struct ResetAnnouncementSummary: Equatable {
                   "Elapsed time must not claim the reset completed")
         try check(headline(for: unknown.announcement, now: now, language: .chinese) == "临时重置 · 时间待公布",
                   "Missing reset time must not be inferred from publication time")
-        try check(scheduleText(for: unknown.announcement, language: .chinese) == "预计时间待公布",
+        try check(scheduleText(for: unknown.announcement, now: now, language: .chinese) == "预计时间待公布",
                   "Missing reset time must not display a fabricated clock time")
         let countdown = record("countdown", offset: 80_130)
         try check(countdownText(for: countdown.announcement, now: now, language: .chinese) == "还剩 22小时15分30秒",
@@ -154,20 +166,26 @@ struct ResetAnnouncementSummary: Equatable {
         let deadline = ISO8601DateFormatter().date(from: "2026-09-23T07:00:00Z")!
         var beijing = active.announcement
         beijing.scheduledFor = deadline
-        try check(scheduleText(for: beijing, language: .chinese) == "预计：洛杉矶周三 00:00（接口时间）",
+        try check(scheduleText(for: beijing, now: now, language: .chinese) == "预计：洛杉矶周三 00:00（接口时间）",
                   "An explicit instant must show Los Angeles clock time without a Beijing minute")
-        try check(ResetScheduleTiming.beijingWeekdayText(for: beijing, language: .chinese) == "对应北京：周三",
+        try check(ResetScheduleTiming.beijingWeekdayText(for: beijing, now: now, language: .chinese) == "对应北京：周三",
                   "The estimate's Beijing conversion must show only its weekday")
         let boundary = ISO8601DateFormatter().date(from: "2026-09-23T06:59:00Z")!
         var dateOnly = active.announcement
         dateOnly.summary = "I promised a reset for Tuesday."
         dateOnly.scheduledFor = boundary
+        let beforeDay = ISO8601DateFormatter().date(from: "2026-09-23T06:59:59Z")!.addingTimeInterval(-86_400)
+        let dayStart = ISO8601DateFormatter().date(from: "2026-09-22T07:00:00Z")!
         let beforeBoundary = ISO8601DateFormatter().date(from: "2026-09-23T06:59:30Z")!
         let afterBoundary = ISO8601DateFormatter().date(from: "2026-09-23T07:00:00Z")!
-        try check(countdownText(for: dateOnly, now: beforeBoundary, language: .chinese) == "预计还剩 0小时0分30秒",
-                  "A date-only estimate must count through the final Los Angeles minute")
-        try check(countdownText(for: dateOnly, now: afterBoundary, language: .chinese) == "预计时间已过 · 等待确认",
-                  "Only Los Angeles next-day midnight ends the estimated countdown")
+        try check(countdownText(for: dateOnly, now: beforeDay, language: .chinese) == "距预告日开始还剩 0小时0分1秒",
+                  "A weekday-only announcement must first count down to the announced day's start")
+        try check(countdownText(for: dateOnly, now: dayStart, language: .chinese) == "预告日内还剩 24小时0分0秒",
+                  "The announced day begins a fresh full-day countdown")
+        try check(countdownText(for: dateOnly, now: beforeBoundary, language: .chinese) == "预告日内还剩 0小时0分30秒",
+                  "The announced day must count through its final Los Angeles minute")
+        try check(countdownText(for: dateOnly, now: afterBoundary, language: .chinese) == "预告日已过 · 等待确认",
+                  "Only Los Angeles next-day midnight ends the date-only countdown")
         try check(ResetScheduleTiming.losAngelesNowText(afterBoundary, language: .chinese) == "洛杉矶现在：周三 00:00:00",
                   "The Los Angeles clock must retain weekday and seconds after the estimate")
         let oldSamePost = record("same", offset: -3_600, age: 7_200)

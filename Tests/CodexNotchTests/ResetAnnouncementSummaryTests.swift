@@ -50,39 +50,45 @@ final class ResetAnnouncementSummaryTests: XCTestCase {
         XCTAssertEqual(ResetAnnouncementSummary.select(from: [pending], now: now)?.id, "watch")
         XCTAssertEqual(ResetAnnouncementSummary.headline(for: pending.announcement, now: now, language: .chinese),
                        "临时重置 · 时间待公布")
-        XCTAssertEqual(ResetAnnouncementSummary.scheduleText(for: pending.announcement, language: .chinese),
+        XCTAssertEqual(ResetAnnouncementSummary.scheduleText(for: pending.announcement, now: now, language: .chinese),
                        "预计时间待公布")
     }
 
     func testScheduleShowsLosAngelesTimeAndOnlyTheBeijingWeekday() {
         var pending = record("scheduled").announcement
         pending.scheduledFor = ISO8601DateFormatter().date(from: "2026-09-23T07:00:00Z")!
-        XCTAssertEqual(ResetAnnouncementSummary.scheduleText(for: pending, language: .chinese),
+        XCTAssertEqual(ResetAnnouncementSummary.scheduleText(for: pending, now: now, language: .chinese),
                        "预计：洛杉矶周三 00:00（接口时间）")
-        XCTAssertEqual(ResetScheduleTiming.beijingWeekdayText(for: pending, language: .chinese),
+        XCTAssertEqual(ResetScheduleTiming.beijingWeekdayText(for: pending, now: now, language: .chinese),
                        "对应北京：周三")
-        XCTAssertFalse(ResetAnnouncementSummary.scheduleText(for: pending, language: .chinese).contains("9月"))
+        XCTAssertFalse(ResetAnnouncementSummary.scheduleText(for: pending, now: now, language: .chinese).contains("9月"))
     }
 
-    func testDateOnlyCountdownKeepsTheLastLosAngelesMinute() {
+    func testDateOnlyCountdownStartsAtDayBoundaryAndStopsAfterTheAnnouncementDay() {
         let parse = ISO8601DateFormatter()
         let scheduled = parse.date(from: "2026-09-23T06:59:00Z")!
+        let previousSecond = parse.date(from: "2026-09-22T06:59:59Z")!
+        let dayStart = parse.date(from: "2026-09-22T07:00:00Z")!
         let before = parse.date(from: "2026-09-23T06:58:30Z")!
         let lastMinute = parse.date(from: "2026-09-23T06:59:30Z")!
         let midnight = parse.date(from: "2026-09-23T07:00:00Z")!
         let announcement = ResetAnnouncement(id: "weekday", title: "周二重置预告", summary: "周二会重置",
-            sourceURL: nil, announcedAt: before, scheduledFor: scheduled,
+            sourceURL: nil, announcedAt: parse.date(from: "2026-09-22T04:31:32Z")!, scheduledFor: scheduled,
             kind: "regular", scope: "all", status: "scheduled")
 
+        XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: announcement, now: previousSecond, language: .chinese),
+                       "距预告日开始还剩 0小时0分1秒")
+        XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: announcement, now: dayStart, language: .chinese),
+                       "预告日内还剩 24小时0分0秒")
         XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: announcement, now: before, language: .chinese),
-                       "预计还剩 0小时1分30秒")
+                       "预告日内还剩 0小时1分30秒")
         XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: announcement, now: lastMinute, language: .chinese),
-                       "预计还剩 0小时0分30秒")
+                       "预告日内还剩 0小时0分30秒")
         XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: announcement, now: midnight, language: .chinese),
-                       "预计时间已过 · 等待确认")
-        XCTAssertEqual(ResetAnnouncementSummary.scheduleText(for: announcement, language: .chinese),
-                       "预计：洛杉矶周二 23:59（日期边界估算，非官方精确时刻）")
-        XCTAssertEqual(ResetScheduleTiming.beijingWeekdayText(for: announcement, language: .chinese),
+                       "预告日已过 · 等待确认")
+        XCTAssertEqual(ResetAnnouncementSummary.scheduleText(for: announcement, now: before, language: .chinese),
+                       "预告日截止参考：洛杉矶周二 23:59（日期估算，非官方时刻）")
+        XCTAssertEqual(ResetScheduleTiming.beijingWeekdayText(for: announcement, now: before, language: .chinese),
                        "对应北京：周三")
     }
 

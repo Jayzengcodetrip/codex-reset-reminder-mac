@@ -26,25 +26,53 @@ enum ResetNotificationText {
             })?.announcement
     }
 
+    /// A completion or cancellation must not be hidden behind a second pending post.
+    /// At most one terminal and one actionable update create separate notifications.
+    static func notificationAnnouncements(from records: [ResetRecord], now: Date,
+                                          pending: [ResetAnnouncement]) -> [ResetAnnouncement] {
+        let terminal = records.map(\.announcement)
+            .filter(ResetAnnouncementSummary.isTerminal)
+            .max { ($0.announcedAt ?? .distantPast) < ($1.announcedAt ?? .distantPast) }
+        let other = announcement(from: records.filter { !ResetAnnouncementSummary.isTerminal($0.announcement) },
+                                 now: now, pending: pending)
+        return [terminal, other].compactMap { $0 }
+    }
+
     static func body(announcement: ResetAnnouncement, now: Date, count: Int) -> String {
-        var lines = [announcement.title]
+        var lines: [String] = []
         let normalizedStatus = announcement.status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         if ["completed", "confirmed", "propagated"].contains(normalizedStatus) {
             lines.append("来源已确认重置完成")
+            lines.append(announcement.title)
         } else if ["cancelled", "canceled"].contains(normalizedStatus) {
             lines.append("来源已取消这次重置")
-        } else if let target = ResetScheduleTiming.target(for: announcement) {
-            lines.append(ResetScheduleTiming.targetText(for: announcement, language: .chinese))
-            if let beijingWeekday = ResetScheduleTiming.beijingWeekdayText(for: announcement, language: .chinese) {
-                lines.append(beijingWeekday)
-            }
-            if target.countdownDeadline > now {
-                lines.append(ResetAnnouncementSummary.countdownText(for: announcement, now: now, language: .chinese))
+            lines.append(announcement.title)
+        } else if let phase = ResetScheduleTiming.phase(for: announcement, now: now) {
+            if phase == .afterDate {
+                lines.append("预告日已过 · 等待确认")
+                lines.append(ResetScheduleTiming.losAngelesNotificationTimeText(now, language: .chinese))
             } else {
+                if phase.countdownDeadline != nil {
+                    lines.append(ResetAnnouncementSummary.countdownText(for: announcement, now: now, language: .chinese))
+                }
+                if let risk = ResetScheduleTiming.quotaRiskText(for: announcement, now: now, language: .chinese) {
+                    lines.append(risk)
+                }
+                lines.append(ResetScheduleTiming.targetText(for: announcement, now: now, language: .chinese))
+                if let beijingWeekday = ResetScheduleTiming.beijingWeekdayText(for: announcement, now: now, language: .chinese) {
+                    lines.append(beijingWeekday)
+                }
+            }
+            if phase == .afterExact {
                 lines.append("预计时间已过，执行状态请查看公告")
             }
+            if phase != .afterDate && ResetScheduleTiming.target(for: announcement)?.isDateBoundaryEstimate == true {
+                lines.append(ResetScheduleTiming.losAngelesNotificationTimeText(now, language: .chinese))
+            }
+            lines.append(announcement.title)
         } else {
             lines.append("重置时间待公布，暂时无法计算倒计时")
+            lines.append(announcement.title)
         }
         if count > 1 { lines.append("共 \(count) 条更新，点击查看") }
         lines.append("来源：NextReset 公开接口")
@@ -151,18 +179,26 @@ final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelega
 
     private func notify(_ records: [ResetRecord]) {
         let now = Date.now
-        guard let announcement = ResetNotificationText.announcement(from: records, now: now, pending: monitor.pendingAnnouncements) else { return }
-        let content = UNMutableNotificationContent()
-        content.title = records.count == 1 ? "重置公告有更新" : "有 \(records.count) 条重置动态"
-        content.body = ResetNotificationText.body(announcement: announcement, now: now, count: records.count)
-        content.sound = .default
-        content.threadIdentifier = "nextreset-announcements"
-        // Ledger deduplication precedes this call. OS delivery never clears unread.
-        let request = UNNotificationRequest(identifier: "reset-\(UUID().uuidString)", content: content, trigger: nil)
-        notificationCenter.add(request) { error in
-            guard error != nil else { return }
-            DispatchQueue.main.async {
-                UserDefaults.standard.set("弹出通知未送达，公告已保留在窗口", forKey: ResetReminderPreferences.notificationStatusKey)
+        let announcements = ResetNotificationText.notificationAnnouncements(
+            from: records, now: now, pending: monitor.pendingAnnouncements
+        )
+        for announcement in announcements {
+            let content = UNMutableNotificationContent()
+            if ResetAnnouncementSummary.isTerminal(announcement) {
+                content.title = "重置公告已更新"
+            } else {
+                content.title = records.count == 1 ? "重置预告有更新" : "有 \(records.count) 条重置动态"
+            }
+            content.body = ResetNotificationText.body(announcement: announcement, now: now, count: records.count)
+            content.sound = .default
+            content.threadIdentifier = "nextreset-announcements"
+            // Ledger deduplication precedes this call. OS delivery never clears unread.
+            let request = UNNotificationRequest(identifier: "reset-\(UUID().uuidString)", content: content, trigger: nil)
+            notificationCenter.add(request) { error in
+                guard error != nil else { return }
+                DispatchQueue.main.async {
+                    UserDefaults.standard.set("弹出通知未送达，公告已保留在窗口", forKey: ResetReminderPreferences.notificationStatusKey)
+                }
             }
         }
     }

@@ -1992,22 +1992,33 @@ contracts:
     last_verified_commit: null
 
   - id: RESET-ANNOUNCEMENTS-005
-    title: Show Los Angeles estimate, live clock and Beijing weekday
+    title: Show two estimated Los Angeles countdown phases and live clock
     status: active
     statement: >-
-      Preserve RESET-ANNOUNCEMENTS-004. When a post only promises a weekday and
-      the source timestamp marks the end of that Los Angeles day, label 23:59
-      as a date-boundary estimate rather than an official minute-level promise.
-      Count down in seconds through the final 23:59 minute and show expected time
-      passed only at the following local 00:00:00. Every unresolved announcement
-      keeps a live Los Angeles weekday and 24-hour HH:mm:ss clock, including after
-      its estimate expires. Its estimated Beijing conversion shows only a weekday,
+      Preserve RESET-ANNOUNCEMENTS-004. For a weekday-only post such as Tuesday,
+      use the original post time to count down in seconds to Los Angeles Tuesday
+      00:00:00, the start of the earliest possible window. At that instant start
+      a second countdown through Tuesday, ending
+      at local Wednesday 00:00:00. At Monday 23:59:59 the first phase has one
+      second left; at Tuesday 23:59:59 the second has one second left. If still
+      unresolved at Wednesday 00:00:00, remove the countdown, show
+      “预告日已过 · 等待确认”, and keep the pending state and a live Los Angeles weekday
+      and 24-hour HH:mm:ss clock until linked
+      completion or cancellation. The clock never includes month or day. Both
+      midnight cutoffs are calendar estimates, not official exact reset times.
+      Neither countdown recommends exhausting quota: execution might be delayed,
+      leaving a user with no available quota while waiting if spent too early.
+      An announcement discovered after its original post time enters the phase
+      dictated by current time without shifting the post timestamp. During either
+      countdown, the estimated Beijing conversion shows only the cutoff weekday,
       never an exact Beijing clock time. An explicitly stated clock time keeps its
       actual deadline. Passing time, an absent source listing, ordinary weekly
-      refresh or reset-credit change never completes a notice; only linked source
-      completion or cancellation terminates it. Distinct pending notices retain
-      independent countdown cards without hiding weekly quota or reset credits.
-    rationale: A weekday-only Tibo post was displayed as a false minute-level reset promise; the user wants a useful estimated countdown and a persistent local reference clock.
+      refresh or reset-credit change never completes a notice. Distinct pending
+      notices retain independent phase calculations and do not hide weekly quota
+      or reset credits. Card and detail clocks are live and labelled “洛杉矶现在”;
+      notification clock is a fixed send-time snapshot labelled “通知时洛杉矶”.
+      Card, detail, and notification wording agree on estimates.
+    rationale: A weekday-only Tibo post does not identify a reset minute; the user wants to see time until the promised day, then time left in that day, then only a live local reference clock while awaiting confirmation.
     source: user-request
     owner: local-customization
     risk: medium
@@ -2015,15 +2026,16 @@ contracts:
       include: [public-announcements, local-unread-state, macos-notifications, multiple-countdowns, notch-entry, interface-check-status]
       exclude: [redeeming-credits, paid-services, model-polling, account-authentication, remote-publication, camera-geometry-redesign]
     examples:
-      positive: Los Angeles Tuesday 23:59:30 shows 30 seconds left and local Tuesday 23:59:30; Wednesday 00:00:00 shows expected time passed and local Wednesday 00:00:00 until linked completion.
-      negative: Ending at Tuesday 23:59:00, displaying a Beijing minute on the estimate, treating a weekly reset as completion, or hiding the local clock while pending.
+      positive: Los Angeles Monday 23:59:59 shows one second until the earliest possible window starts; Tuesday 00:00:00 starts a full-day countdown; Tuesday 23:59:59 shows one second left; Wednesday 00:00:00 shows no countdown, “预告日已过 · 等待确认” and local Wednesday 00:00:00 until linked completion.
+      negative: Advising users to exhaust quota before the estimated reset, ending either phase at 23:59:00, keeping a countdown after Wednesday 00:00:00, displaying a Beijing minute on the estimate, labelling a notification snapshot as live, treating a weekly reset as completion, or hiding the local clock while pending.
     guards:
       - Tests/CodexNotchTests/ResetAnnouncementSummaryTests.swift
       - Tests/CodexNotchTests/ResetAnnouncementDisplayTests.swift
+      - Tests/CodexNotchTests/ResetScheduleTimingTests.swift
       - Tests/CodexNotchTests/ResetNotificationTextTests.swift
       - Tests/CodexNotchTests/ResetPendingAnnouncementsTests.swift
       - Sources/CodexNotch/Announcements/ResetSelfCheck.swift
-      - "manual: verify live Los Angeles weekday and HH:mm:ss before and after expiry, two pending cards, weekly quota and reset credits"
+      - "manual: verify both date-only countdown phases, no countdown after the second cutoff, live Los Angeles weekday and HH:mm:ss throughout, two pending cards, weekly quota and reset credits"
     supersedes: [RESET-ANNOUNCEMENTS-004]
     superseded_by: null
     last_verified_commit: null

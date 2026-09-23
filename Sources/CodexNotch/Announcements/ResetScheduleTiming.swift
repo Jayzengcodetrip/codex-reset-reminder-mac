@@ -9,6 +9,23 @@ enum ResetScheduleTiming {
         let isDateBoundaryEstimate: Bool
     }
 
+    enum Phase: Equatable {
+        case beforeDate(Date)
+        case duringDate(Date)
+        case afterDate
+        case beforeExact(Date)
+        case afterExact
+
+        var countdownDeadline: Date? {
+            switch self {
+            case .beforeDate(let deadline), .duringDate(let deadline), .beforeExact(let deadline):
+                return deadline
+            case .afterDate, .afterExact:
+                return nil
+            }
+        }
+    }
+
     static let losAngeles = TimeZone(identifier: "America/Los_Angeles")!
     static let beijing = TimeZone(identifier: "Asia/Shanghai")!
 
@@ -26,8 +43,17 @@ enum ResetScheduleTiming {
         // NextReset has used 23:59 and, in an earlier snapshot, next-day 00:00
         // to represent a post that only promised a weekday. Neither is a
         // minute-level promise. Treat the whole final minute as still pending.
-        if !hasClock && parts.hour == 23 && parts.minute == 59,
-           mentionsWeekday(of: scheduled, in: text, calendar: calendar) {
+        // A weekday in the post is direct evidence. If a later source revision
+        // removes that excerpt, a preserved original X post link still lets us
+        // treat NextReset's 23:59 marker as a date estimate.
+        let hasOriginalPost = announcement.sourceURL.flatMap { url -> Bool? in
+            guard let host = url.host?.lowercased(),
+                  ["x.com", "www.x.com", "twitter.com", "www.twitter.com"].contains(host) else { return nil }
+            let parts = url.path.split(separator: "/")
+            return parts.count >= 3 && parts[parts.count - 2] == "status" && parts.last?.allSatisfy(\.isNumber) == true
+        } == true
+        if !hasClock && parts.hour == 23 && parts.minute == 59
+            && (mentionsWeekday(of: scheduled, in: text, calendar: calendar) || hasOriginalPost) {
             let day = calendar.startOfDay(for: scheduled)
             if let nextDay = calendar.date(byAdding: .day, value: 1, to: day),
                let finalMinute = calendar.date(byAdding: .minute, value: -1, to: nextDay) {
@@ -45,6 +71,20 @@ enum ResetScheduleTiming {
                       isDateBoundaryEstimate: false)
     }
 
+    static func phase(for announcement: ResetAnnouncement, now: Date) -> Phase? {
+        guard let target = target(for: announcement) else { return nil }
+        if target.isDateBoundaryEstimate {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = losAngeles
+            let dayStart = calendar.startOfDay(for: target.displayedTime)
+            if now < dayStart { return .beforeDate(dayStart) }
+            if now < target.countdownDeadline { return .duringDate(target.countdownDeadline) }
+            return .afterDate
+        }
+        return now < target.countdownDeadline
+            ? .beforeExact(target.countdownDeadline) : .afterExact
+    }
+
     static func losAngelesNowText(_ now: Date, language: AppLanguage) -> String {
         let clock = formattedTime(now, zone: losAngeles, format: "HH:mm:ss")
         let weekday = weekdayText(now, zone: losAngeles, language: language)
@@ -52,34 +92,80 @@ enum ResetScheduleTiming {
                                   english: "Los Angeles now: \(weekday) \(clock)")
     }
 
-    static func targetText(for announcement: ResetAnnouncement, language: AppLanguage) -> String {
+    static func losAngelesNotificationTimeText(_ now: Date, language: AppLanguage) -> String {
+        let clock = formattedTime(now, zone: losAngeles, format: "HH:mm:ss")
+        let weekday = weekdayText(now, zone: losAngeles, language: language)
+        return language.localized(chinese: "通知时洛杉矶：\(weekday) \(clock)",
+                                  english: "Los Angeles at notification: \(weekday) \(clock)")
+    }
+
+    static func targetText(for announcement: ResetAnnouncement, now: Date, language: AppLanguage) -> String {
         guard let target = target(for: announcement) else {
             return language.localized(chinese: "预计时间待公布", english: "Expected time not announced")
         }
+        if target.isDateBoundaryEstimate {
+            switch phase(for: announcement, now: now) {
+            case .beforeDate(let dayStart):
+                let weekday = weekdayText(dayStart, zone: losAngeles, language: language)
+                return language.localized(
+                    chinese: "最早可能窗口：洛杉矶\(weekday) 00:00（日期估算，非官方时刻）",
+                    english: "Earliest possible window: Los Angeles \(weekday) 00:00 (calendar estimate)"
+                )
+            case .duringDate:
+                let weekday = weekdayText(target.displayedTime, zone: losAngeles, language: language)
+                return language.localized(
+                    chinese: "预告日截止参考：洛杉矶\(weekday) 23:59（日期估算，非官方时刻）",
+                    english: "Announced-day end: Los Angeles \(weekday) 23:59 (calendar estimate)"
+                )
+            case .afterDate:
+                return language.localized(chinese: "预告日已过 · 等待确认", english: "Announced day passed · Awaiting confirmation")
+            default:
+                break
+            }
+        }
         let weekday = weekdayText(target.displayedTime, zone: losAngeles, language: language)
         let clock = formattedTime(target.displayedTime, zone: losAngeles, format: "HH:mm")
-        if target.isDateBoundaryEstimate {
-            return language.localized(
-                chinese: "预计：洛杉矶\(weekday) \(clock)（日期边界估算，非官方精确时刻）",
-                english: "Estimate: Los Angeles \(weekday) \(clock) (day boundary, not an official minute)"
-            )
-        }
         return language.localized(chinese: "预计：洛杉矶\(weekday) \(clock)（接口时间）",
                                   english: "Expected: Los Angeles \(weekday) \(clock) (source time)")
     }
 
-    static func beijingWeekdayText(for announcement: ResetAnnouncement, language: AppLanguage) -> String? {
+    static func quotaRiskText(for announcement: ResetAnnouncement, now: Date, language: AppLanguage) -> String? {
+        guard let target = target(for: announcement), target.isDateBoundaryEstimate,
+              let phase = phase(for: announcement, now: now),
+              phase != .afterDate else { return nil }
+        return language.localized(
+            chinese: "不建议仅凭预告清空额度；实际重置可能延后。",
+            english: "Do not exhaust quota based only on the post; reset may be delayed."
+        )
+    }
+
+    static func beijingWeekdayText(for announcement: ResetAnnouncement, now: Date, language: AppLanguage) -> String? {
         guard let target = target(for: announcement) else { return nil }
-        let weekday = weekdayText(target.countdownDeadline, zone: beijing, language: language)
+        let cutoff: Date
+        switch phase(for: announcement, now: now) {
+        case .beforeDate(let dayStart): cutoff = dayStart
+        case .duringDate(let dayEnd): cutoff = dayEnd
+        case .afterDate: return nil
+        default: cutoff = target.countdownDeadline
+        }
+        let weekday = weekdayText(cutoff, zone: beijing, language: language)
         return language.localized(chinese: "对应北京：\(weekday)",
                                   english: "Beijing weekday: \(weekday)")
     }
 
-    static func dateBoundaryExplanation(language: AppLanguage) -> String {
-        language.localized(
-            chinese: "按洛杉矶预告日的最后一分钟估算；原帖未公布精确重置时刻。",
-            english: "Estimated from the last minute of the Los Angeles announcement day; the post gave no exact reset time."
-        )
+    static func dateBoundaryExplanation(for announcement: ResetAnnouncement, now: Date, language: AppLanguage) -> String {
+        switch phase(for: announcement, now: now) {
+        case .beforeDate:
+            return language.localized(
+                chinese: "洛杉矶预告日 00:00 只是最早可能窗口，不是官方承诺的重置时刻；若提前用尽额度，重置延后时就无法继续使用。",
+                english: "The announced Los Angeles day at 00:00 is only the earliest possible window, not a promised reset minute. Exhausting quota early may leave you unable to use it if the reset is delayed."
+            )
+        default:
+            return language.localized(
+                chinese: "按洛杉矶预告日的最后一分钟估算；原帖未公布精确重置时刻，不建议仅凭预告清空额度。",
+                english: "Estimated from the final minute of the announced Los Angeles day; the post gave no exact reset time, so do not exhaust quota based on it alone."
+            )
+        }
     }
 
     private static func weekdayText(_ date: Date, zone: TimeZone, language: AppLanguage) -> String {

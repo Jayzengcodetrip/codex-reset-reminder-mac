@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import CodexNotch
 
@@ -28,6 +29,7 @@ final class ResetNotificationTextTests: XCTestCase {
         XCTAssertFalse(body.contains("北京时间"))
         XCTAssertTrue(body.contains("共 2 条"))
         XCTAssertTrue(body.contains("接口时间"))
+        XCTAssertFalse(body.contains("不建议仅凭预告清空额度"))
     }
 
     func testDateOnlyNotificationDisclosesEstimateAndSeconds() {
@@ -36,11 +38,43 @@ final class ResetNotificationTextTests: XCTestCase {
         let now = parser.date(from: "2026-09-23T06:58:30Z")!
         let body = ResetNotificationText.body(announcement: post(title: "周二预告", summary: "周二重置",
             scheduledFor: scheduled, now: now), now: now, count: 1)
-        XCTAssertTrue(body.contains("预计：洛杉矶周二 23:59（日期边界估算，非官方精确时刻）"))
+        XCTAssertTrue(body.contains("预告日截止参考：洛杉矶周二 23:59（日期估算，非官方时刻）"))
         XCTAssertTrue(body.contains("对应北京：周三"))
-        XCTAssertTrue(body.contains("预计还剩 0小时1分30秒"))
+        XCTAssertTrue(body.contains("预告日内还剩 0小时1分30秒"))
+        XCTAssertEqual(Array(body.components(separatedBy: "\n").prefix(3)), [
+            "预告日内还剩 0小时1分30秒",
+            "不建议仅凭预告清空额度；实际重置可能延后。",
+            "预告日截止参考：洛杉矶周二 23:59（日期估算，非官方时刻）"
+        ])
+        XCTAssertTrue(body.contains("通知时洛杉矶：周二 23:58:30"))
+        XCTAssertFalse(body.contains("洛杉矶现在："))
         XCTAssertFalse(body.contains("9月23日"))
         XCTAssertFalse(body.contains("15:00"))
+    }
+
+    func testDateOnlyNotificationUsesStartOfDayDuringTheFirstPhase() {
+        let parser = ISO8601DateFormatter()
+        let scheduled = parser.date(from: "2026-09-23T06:59:00Z")!
+        let now = parser.date(from: "2026-09-22T06:59:59Z")!
+        let body = ResetNotificationText.body(announcement: post(title: "周二预告", summary: "周二重置",
+            scheduledFor: scheduled, now: now), now: now, count: 1)
+        XCTAssertTrue(body.contains("最早可能窗口：洛杉矶周二 00:00（日期估算，非官方时刻）"))
+        XCTAssertTrue(body.contains("对应北京：周二"))
+        XCTAssertTrue(body.contains("距预告日开始还剩 0小时0分1秒"))
+        XCTAssertTrue(body.contains("不建议仅凭预告清空额度；实际重置可能延后。"))
+        XCTAssertTrue(body.contains("通知时洛杉矶：周一 23:59:59"))
+    }
+
+    func testDateOnlyNotificationAfterDayEndsShowsNoCountdown() {
+        let parser = ISO8601DateFormatter()
+        let scheduled = parser.date(from: "2026-09-23T06:59:00Z")!
+        let now = parser.date(from: "2026-09-23T07:00:00Z")!
+        let body = ResetNotificationText.body(announcement: post(title: "周二预告", summary: "周二重置",
+            scheduledFor: scheduled, now: now), now: now, count: 1)
+        XCTAssertTrue(body.contains("预告日已过 · 等待确认"))
+        XCTAssertTrue(body.contains("通知时洛杉矶：周三 00:00:00"))
+        XCTAssertFalse(body.contains("还剩"))
+        XCTAssertFalse(body.contains("不建议仅凭预告清空额度"))
     }
 
     func testMixedBatchPrioritizesAdvanceDeadline() {
@@ -58,7 +92,7 @@ final class ResetNotificationTextTests: XCTestCase {
     }
 
     func testPassingTimeDoesNotAssertResetOccurred() {
-        let now = Date()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
         let body = ResetNotificationText.body(announcement: post(scheduledFor: now.addingTimeInterval(-60),
             now: now), now: now, count: 1)
         XCTAssertTrue(body.contains("执行状态请查看公告"))
@@ -78,6 +112,29 @@ final class ResetNotificationTextTests: XCTestCase {
         let updates = ledger.ingest(NextResetSnapshot(announcements: [first, second], sourceCheckedAt: now, sourceIsFresh: true), at: now, occurredWhileAway: false)
         XCTAssertEqual(ledger.pendingAnnouncements.map(\.id), ["first", "second"])
         XCTAssertEqual(ResetNotificationText.announcement(from: updates, now: now, pending: ledger.pendingAnnouncements)?.id, "second")
+    }
+
+    func testLinkedCompletionAndIndependentNewPreviewProduceDistinctNotifications() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let first = post("first", title: "第一次预告", scheduledFor: now.addingTimeInterval(600), now: now)
+        let second = post("second", title: "独立预告", scheduledFor: now.addingTimeInterval(7_200), now: now)
+        var ledger = ResetLedger()
+        _ = ledger.ingest(NextResetSnapshot(announcements: [first], sourceCheckedAt: now,
+            sourceIsFresh: true), at: now, occurredWhileAway: false)
+
+        var completedFirst = first
+        completedFirst.status = "completed"
+        let updates = ledger.ingest(NextResetSnapshot(announcements: [completedFirst, second],
+            sourceCheckedAt: now, sourceIsFresh: true), at: now, occurredWhileAway: false)
+        XCTAssertEqual(ledger.pendingAnnouncements.map(\.id), ["second"])
+        XCTAssertEqual(Set(updates.map(\.id)), Set(["first", "second"]))
+        let notices = ResetNotificationText.notificationAnnouncements(from: updates, now: now,
+            pending: ledger.pendingAnnouncements)
+        XCTAssertEqual(notices.map(\.id), ["first", "second"])
+        XCTAssertTrue(ResetNotificationText.body(announcement: notices[0], now: now, count: 2)
+            .contains("来源已确认重置完成"))
+        XCTAssertTrue(ResetNotificationText.body(announcement: notices[1], now: now, count: 2)
+            .contains("还剩 2小时0分0秒"))
     }
 
     func testCompletedNoticeDoesNotShowOldFutureCountdown() {

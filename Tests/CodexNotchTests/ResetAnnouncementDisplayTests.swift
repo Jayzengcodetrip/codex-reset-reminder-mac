@@ -52,18 +52,24 @@ final class ResetAnnouncementDisplayTests: XCTestCase {
                        "还剩 0小时0分1秒")
     }
 
-    func testDateOnlyDetailKeepsSecondCountdownUntilLocalMidnight() {
+    func testDateOnlyDetailTransitionsFromDayStartToDayEndAndThenStopsCounting() {
         let parser = ISO8601DateFormatter()
         let scheduled = parser.date(from: "2026-09-23T06:59:00Z")!
+        let beforeDay = parser.date(from: "2026-09-22T06:59:59Z")!
+        let startOfDay = parser.date(from: "2026-09-22T07:00:00Z")!
         let before = parser.date(from: "2026-09-23T06:59:30Z")!
         let midnight = parser.date(from: "2026-09-23T07:00:00Z")!
         let post = ResetAnnouncement(id: "weekday", title: "周二预告", summary: "周二重置",
-            sourceURL: nil, announcedAt: before.addingTimeInterval(-3_600), scheduledFor: scheduled,
+            sourceURL: nil, announcedAt: parser.date(from: "2026-09-22T04:31:32Z")!, scheduledFor: scheduled,
             kind: "regular", scope: "all", status: "scheduled")
+        XCTAssertEqual(ResetAnnouncementDisplay.timingText(post, now: beforeDay, language: .chinese),
+                       "距预告日开始还剩 0小时0分1秒")
+        XCTAssertEqual(ResetAnnouncementDisplay.timingText(post, now: startOfDay, language: .chinese),
+                       "预告日内还剩 24小时0分0秒")
         XCTAssertEqual(ResetAnnouncementDisplay.timingText(post, now: before, language: .chinese),
-                       "预计还剩 0小时0分30秒")
+                       "预告日内还剩 0小时0分30秒")
         XCTAssertEqual(ResetAnnouncementDisplay.timingText(post, now: midnight, language: .chinese),
-                       "预计时间已过，待确认")
+                       "预告日已过 · 等待确认")
         XCTAssertFalse(ResetAnnouncementDisplay.isCompleted(post))
     }
 

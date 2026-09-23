@@ -70,7 +70,9 @@ final class ResetPendingAnnouncementsTests: XCTestCase {
             sourceIsFresh: true), at: before, occurredWhileAway: false)
         XCTAssertEqual(ledger.pendingAnnouncements.map(\.id), ["tuesday", "wednesday"])
         XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: first, now: before, language: .chinese),
-                       "预计还剩 0小时1分30秒")
+                       "预告日内还剩 0小时1分30秒")
+        XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: second, now: before, language: .chinese),
+                       "距预告日开始还剩 0小时1分30秒")
 
         // Neither time passing nor a later source snapshot omitting both posts confirms either reset.
         _ = ledger.ingest(NextResetSnapshot(announcements: [], sourceCheckedAt: after,
@@ -78,9 +80,11 @@ final class ResetPendingAnnouncementsTests: XCTestCase {
         let restored = try JSONDecoder().decode(ResetLedger.self, from: JSONEncoder().encode(ledger))
         XCTAssertEqual(restored.pendingAnnouncements.map(\.id), ["tuesday", "wednesday"])
         XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: restored.pendingAnnouncements[0],
-            now: after, language: .chinese), "预计时间已过 · 等待确认")
-        XCTAssertTrue(ResetAnnouncementSummary.countdownText(for: restored.pendingAnnouncements[1],
-            now: after, language: .chinese).hasPrefix("预计还剩 "))
+            now: after, language: .chinese), "预告日已过 · 等待确认")
+        XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: restored.pendingAnnouncements[1],
+            now: after, language: .chinese), "预告日内还剩 24小时0分0秒")
+        XCTAssertEqual(ResetScheduleTiming.losAngelesNowText(after, language: .chinese),
+                       "洛杉矶现在：周三 00:00:00")
 
         var completed = first
         completed.status = "completed"
