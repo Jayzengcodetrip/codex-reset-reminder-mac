@@ -1,6 +1,7 @@
 name: Release Mac app
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
@@ -11,6 +12,8 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
+    env:
+      RELEASE_TAG: v0.2.0
     steps:
       - uses: actions/checkout@v4
       - name: Confirm Apple Silicon runner
@@ -19,7 +22,10 @@ jobs:
         shell: bash
         run: |
           app_version="$(plutil -extract CFBundleShortVersionString raw -o - Resources/Info.plist)"
-          test "${GITHUB_REF_NAME}" = "v${app_version}"
+          test "${RELEASE_TAG}" = "v${app_version}"
+          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+            test "${GITHUB_REF_NAME}" = "${RELEASE_TAG}"
+          fi
       - name: Check behavior contracts and tests
         run: |
           ./scripts/check_contracts.sh
@@ -34,10 +40,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
+          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+            target_option=(--verify-tag)
+          else
+            target_option=(--target "${GITHUB_SHA}")
+          fi
+          gh release create "${RELEASE_TAG}" \
             dist/CodexNotch-*.dmg \
             dist/CodexNotch-*.zip \
             dist/CodexNotch-*.sha256 \
-            --verify-tag \
-            --title "Codex 重置提醒 ${GITHUB_REF_NAME}" \
+            "${target_option[@]}" \
+            --title "Codex 重置提醒 ${RELEASE_TAG}" \
             --notes-file docs/releases/v0.2.0.md
