@@ -26,24 +26,20 @@ enum ResetNotificationText {
             })?.announcement
     }
 
-    static func body(title: String, scheduledFor: Date?, now: Date, count: Int, status: String? = nil) -> String {
-        var lines = [title]
-        let normalizedStatus = status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    static func body(announcement: ResetAnnouncement, now: Date, count: Int) -> String {
+        var lines = [announcement.title]
+        let normalizedStatus = announcement.status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         if ["completed", "confirmed", "propagated"].contains(normalizedStatus) {
             lines.append("来源已确认重置完成")
         } else if ["cancelled", "canceled"].contains(normalizedStatus) {
             lines.append("来源已取消这次重置")
-        } else if let date = scheduledFor {
-            let format = DateFormatter()
-            format.locale = Locale(identifier: "zh_CN")
-            format.timeZone = TimeZone(identifier: "Asia/Shanghai")
-            format.dateFormat = "M月d日 HH:mm"
-            if date > now {
-                let minutes = max(1, Int(ceil(date.timeIntervalSince(now) / 60)))
-                let remaining = minutes >= 60
-                    ? "\(minutes / 60)小时\(minutes % 60)分钟"
-                    : "\(minutes)分钟"
-                lines.append("北京时间 \(format.string(from: date))，还剩 \(remaining)（接口时间）")
+        } else if let target = ResetScheduleTiming.target(for: announcement) {
+            lines.append(ResetScheduleTiming.targetText(for: announcement, language: .chinese))
+            if let beijingWeekday = ResetScheduleTiming.beijingWeekdayText(for: announcement, language: .chinese) {
+                lines.append(beijingWeekday)
+            }
+            if target.countdownDeadline > now {
+                lines.append(ResetAnnouncementSummary.countdownText(for: announcement, now: now, language: .chinese))
             } else {
                 lines.append("预计时间已过，执行状态请查看公告")
             }
@@ -158,11 +154,7 @@ final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelega
         guard let announcement = ResetNotificationText.announcement(from: records, now: now, pending: monitor.pendingAnnouncements) else { return }
         let content = UNMutableNotificationContent()
         content.title = records.count == 1 ? "重置公告有更新" : "有 \(records.count) 条重置动态"
-        content.body = ResetNotificationText.body(
-            title: announcement.title,
-            scheduledFor: announcement.scheduledFor,
-            now: now, count: records.count, status: announcement.status
-        )
+        content.body = ResetNotificationText.body(announcement: announcement, now: now, count: records.count)
         content.sound = .default
         content.threadIdentifier = "nextreset-announcements"
         // Ledger deduplication precedes this call. OS delivery never clears unread.

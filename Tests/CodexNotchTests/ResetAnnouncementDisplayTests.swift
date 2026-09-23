@@ -46,10 +46,25 @@ final class ResetAnnouncementDisplayTests: XCTestCase {
     func testCountdownUsesProvidedDeadlineAndShowsFinalMinute() {
         let later = announcement(scheduledFor: now.addingTimeInterval(90 * 60), status: "scheduled")
         XCTAssertEqual(ResetAnnouncementDisplay.timingText(later, now: now, language: .chinese),
-                       "距计划重置还有 1 小时 30 分")
+                       "还剩 1小时30分0秒")
         let soon = announcement(scheduledFor: now.addingTimeInterval(1), status: "scheduled")
         XCTAssertEqual(ResetAnnouncementDisplay.timingText(soon, now: now, language: .chinese),
-                       "距计划重置还有 1 分钟")
+                       "还剩 0小时0分1秒")
+    }
+
+    func testDateOnlyDetailKeepsSecondCountdownUntilLocalMidnight() {
+        let parser = ISO8601DateFormatter()
+        let scheduled = parser.date(from: "2026-09-23T06:59:00Z")!
+        let before = parser.date(from: "2026-09-23T06:59:30Z")!
+        let midnight = parser.date(from: "2026-09-23T07:00:00Z")!
+        let post = ResetAnnouncement(id: "weekday", title: "周二预告", summary: "周二重置",
+            sourceURL: nil, announcedAt: before.addingTimeInterval(-3_600), scheduledFor: scheduled,
+            kind: "regular", scope: "all", status: "scheduled")
+        XCTAssertEqual(ResetAnnouncementDisplay.timingText(post, now: before, language: .chinese),
+                       "预计还剩 0小时0分30秒")
+        XCTAssertEqual(ResetAnnouncementDisplay.timingText(post, now: midnight, language: .chinese),
+                       "预计时间已过，待确认")
+        XCTAssertFalse(ResetAnnouncementDisplay.isCompleted(post))
     }
 
     func testBeijingDisplayIgnoresSystemTimezoneAndConvertsAcrossDates() {

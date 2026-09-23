@@ -12,7 +12,8 @@ struct ResetAnnouncementEntriesView: View {
 
     static func height(for count: Int) -> CGFloat {
         let visibleCount = min(2, max(1, count))
-        return CGFloat(visibleCount) * ResetAnnouncementEntryView.height + CGFloat(visibleCount - 1) * 8
+        let entryHeight = count == 0 ? ResetAnnouncementEntryView.emptyHeight : ResetAnnouncementEntryView.announcementHeight
+        return CGFloat(visibleCount) * entryHeight + CGFloat(visibleCount - 1) * 8
     }
 
     var body: some View {
@@ -47,7 +48,8 @@ struct ResetAnnouncementEntriesView: View {
 
 /// A stable-height entry keeps announcement updates from moving the quota card.
 struct ResetAnnouncementEntryView: View {
-    static let height: CGFloat = 96
+    static let emptyHeight: CGFloat = 96
+    static let announcementHeight: CGFloat = 124
 
     let unreadCount: Int
     let awayUnreadCount: Int
@@ -87,6 +89,8 @@ struct ResetAnnouncementEntryView: View {
         return [title,
                 ResetAnnouncementSummary.headline(for: announcement, now: now, language: language),
                 ResetAnnouncementSummary.scheduleText(for: announcement, language: language),
+                ResetScheduleTiming.beijingWeekdayText(for: announcement, language: language) ?? "",
+                ResetScheduleTiming.losAngelesNowText(now, language: language),
                 statusText].joined(separator: "，")
     }
 
@@ -116,6 +120,17 @@ struct ResetAnnouncementEntryView: View {
                             .foregroundStyle(Color.white.opacity(0.9))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
+                        if let beijingWeekday = ResetScheduleTiming.beijingWeekdayText(for: announcement, language: language) {
+                            Text(beijingWeekday)
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(Color.white.opacity(0.8))
+                                .lineLimit(1)
+                        }
+                        Text(ResetScheduleTiming.losAngelesNowText(now, language: language))
+                            .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.white.opacity(0.9))
+                            .lineLimit(1)
                     } else {
                         Text(title)
                             .font(.system(size: 12, weight: .semibold))
@@ -138,7 +153,9 @@ struct ResetAnnouncementEntryView: View {
                     .foregroundStyle(Color.white.opacity(0.45))
             }
             .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height)
+            .frame(maxWidth: .infinity,
+                   minHeight: announcement == nil ? Self.emptyHeight : Self.announcementHeight,
+                   maxHeight: announcement == nil ? Self.emptyHeight : Self.announcementHeight)
             .background(highlighted ? Color.orange.opacity(0.12) : Color.white.opacity(0.055))
             .clipShape(RoundedRectangle(cornerRadius: 11))
             .overlay {
@@ -415,14 +432,30 @@ private struct ResetAnnouncementDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
 
-                TimelineView(.periodic(from: .now, by: 30)) { context in
+                TimelineView(.periodic(from: .now, by: 1)) { context in
                     VStack(alignment: .leading, spacing: 7) {
                         Text(ResetAnnouncementDisplay.timingText(announcement, now: context.date, language: language))
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(ResetAnnouncementDisplay.isCompleted(announcement) ? Color.mint : Color.orange)
-                        if let scheduled = announcement.scheduledFor {
-                            Text(label("计划重置：", "Scheduled reset: ") + ResetAnnouncementDisplay.beijingDate(scheduled) + label(" 北京时间", " Beijing"))
+                        if announcement.scheduledFor != nil {
+                            Text(ResetScheduleTiming.targetText(for: announcement, language: language))
                                 .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                            if let beijingWeekday = ResetScheduleTiming.beijingWeekdayText(for: announcement, language: language) {
+                                Text(beijingWeekday)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            if ResetScheduleTiming.target(for: announcement)?.isDateBoundaryEstimate == true {
+                                Text(ResetScheduleTiming.dateBoundaryExplanation(language: language))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if !ResetAnnouncementSummary.isTerminal(announcement) {
+                            Text(ResetScheduleTiming.losAngelesNowText(context.date, language: language))
+                                .font(.system(size: 11, design: .rounded))
+                                .monospacedDigit()
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -497,25 +530,13 @@ enum ResetAnnouncementDisplay {
         if ["cancelled", "canceled"].contains(announcement.status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "") {
             return language.localized(chinese: "来源已取消这次重置", english: "Source reports this reset was cancelled")
         }
-        guard let deadline = announcement.scheduledFor else {
+        guard let target = ResetScheduleTiming.target(for: announcement) else {
             return language.localized(chinese: "公告未提供明确重置时间", english: "No exact reset time was provided")
         }
-        guard deadline > now else {
+        guard target.countdownDeadline > now else {
             return language.localized(chinese: "预计时间已过，待确认", english: "Expected time has passed; awaiting confirmation")
         }
-        let minutes = max(1, Int(ceil(deadline.timeIntervalSince(now) / 60)))
-        let days = minutes / 1_440
-        let hours = (minutes % 1_440) / 60
-        let remainingMinutes = minutes % 60
-        let duration: String
-        if days > 0 {
-            duration = language.localized(chinese: "\(days) 天 \(hours) 小时 \(remainingMinutes) 分", english: "\(days)d \(hours)h \(remainingMinutes)m")
-        } else if hours > 0 {
-            duration = language.localized(chinese: "\(hours) 小时 \(remainingMinutes) 分", english: "\(hours)h \(remainingMinutes)m")
-        } else {
-            duration = language.localized(chinese: "\(remainingMinutes) 分钟", english: "\(remainingMinutes)m")
-        }
-        return language.localized(chinese: "距计划重置还有 \(duration)", english: "Scheduled reset in \(duration)")
+        return ResetAnnouncementSummary.countdownText(for: announcement, now: now, language: language)
     }
 
     static func safeSourceURL(_ url: URL?) -> URL? {

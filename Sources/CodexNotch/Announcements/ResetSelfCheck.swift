@@ -167,20 +167,30 @@ enum ResetSelfCheck {
         try await refresh(delayedMonitor)
         try check(delayedMonitor.errorMessage == nil && delayedNotifications == 1 && delayedMonitor.unreadCount == 1,
                   "New interface records must still notify when upstream X diagnostics report delay")
-        let completedBody = ResetNotificationText.body(title: "已完成公告", scheduledFor: now.addingTimeInterval(3600),
-                                                       now: now, count: 1, status: "completed")
+        func notificationPost(_ title: String, deadline: Date?, status: String? = nil) -> ResetAnnouncement {
+            ResetAnnouncement(id: title, title: title, summary: "公开测试数据", sourceURL: nil,
+                              announcedAt: now, scheduledFor: deadline, kind: "regular",
+                              scope: "unspecified", status: status)
+        }
+        let completedBody = ResetNotificationText.body(
+            announcement: notificationPost("已完成公告", deadline: now.addingTimeInterval(3600), status: "completed"),
+            now: now, count: 1)
         try check(!completedBody.contains("还剩") && completedBody.contains("来源已确认重置完成"),
                   "Completed notification must suppress an obsolete future countdown")
-        let paddedCompletedBody = ResetNotificationText.body(title: "已完成公告", scheduledFor: now.addingTimeInterval(3600),
-                                                             now: now, count: 1, status: " COMPLETED \n")
+        let paddedCompletedBody = ResetNotificationText.body(
+            announcement: notificationPost("已完成公告", deadline: now.addingTimeInterval(3600), status: " COMPLETED \n"),
+            now: now, count: 1)
         try check(paddedCompletedBody == completedBody,
                   "Whitespace and capitalization must not turn a completed notification into a countdown")
-        let unknownBody = ResetNotificationText.body(title: "新公告", scheduledFor: nil, now: now, count: 1)
+        let unknownBody = ResetNotificationText.body(
+            announcement: notificationPost("新公告", deadline: nil), now: now, count: 1)
         try check(!unknownBody.contains("还剩"), "Unknown schedule must not create a notification countdown")
         try check(unknownBody.contains("时间待公布"), "Undated notification must explain why no countdown is available")
-        let futureBody = ResetNotificationText.body(title: "新预告", scheduledFor: now.addingTimeInterval(5_400), now: now, count: 1)
-        try check(futureBody.contains("北京时间") && futureBody.contains("还剩 1小时30分钟") && futureBody.contains("接口时间"),
-                  "Advance notification must include the Beijing deadline and time remaining with source attribution")
+        let futureBody = ResetNotificationText.body(
+            announcement: notificationPost("新预告", deadline: now.addingTimeInterval(5_400)), now: now, count: 1)
+        try check(futureBody.contains("洛杉矶") && futureBody.contains("还剩 1小时30分0秒")
+                  && futureBody.contains("对应北京：") && futureBody.contains("接口时间"),
+                  "Advance notification must give Los Angeles estimate, seconds, and Beijing weekday")
         var terminalDetail = post("terminal-detail")
         terminalDetail.scheduledFor = now.addingTimeInterval(3600)
         terminalDetail.status = " COMPLETED \n"
@@ -212,9 +222,9 @@ enum ResetSelfCheck {
                   "Mixed notification batch must prioritize the latest changed pending preannouncement")
         try check(ResetNotificationText.announcement(from: secondChanges, now: now, pending: simultaneousPending)?.id == "second",
                   "The new second preannouncement must be notified without replacing the first")
-        try check(ResetAnnouncementEntriesView.height(for: 0) == 96 && ResetAnnouncementEntriesView.height(for: 1) == 96,
-                  "Empty and single-announcement cards must preserve the existing layout height")
-        try check(ResetAnnouncementEntriesView.height(for: 2) == 200 && ResetAnnouncementEntriesView.height(for: 5) == 200,
+        try check(ResetAnnouncementEntriesView.height(for: 0) == 96 && ResetAnnouncementEntriesView.height(for: 1) == 124,
+                  "An active announcement must reserve room for its live Los Angeles clock")
+        try check(ResetAnnouncementEntriesView.height(for: 2) == 256 && ResetAnnouncementEntriesView.height(for: 5) == 256,
                   "Two countdowns fit above quota and further countdowns scroll within bounded height")
         let pendingStore = CheckStore()
         var pendingPosts = [advance]

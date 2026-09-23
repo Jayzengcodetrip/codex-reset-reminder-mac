@@ -1951,7 +1951,7 @@ contracts:
 
   - id: RESET-ANNOUNCEMENTS-004
     title: Keep all pending countdowns without ordinal labels
-    status: active
+    status: superseded
     statement: >-
       The user explicitly cancelled numbered preannouncements. Preserve the interface
       check, atomic-save, failure, notification, catch-up and privacy behavior of
@@ -1988,6 +1988,43 @@ contracts:
       - docs/decisions/035-concurrent-reset-countdowns.md
       - "manual: verify unnumbered countdowns, simple interface check result, weekly quota and reset credits in the installed app"
     supersedes: [RESET-ANNOUNCEMENTS-003]
+    superseded_by: RESET-ANNOUNCEMENTS-005
+    last_verified_commit: null
+
+  - id: RESET-ANNOUNCEMENTS-005
+    title: Show Los Angeles estimate, live clock and Beijing weekday
+    status: active
+    statement: >-
+      Preserve RESET-ANNOUNCEMENTS-004. When a post only promises a weekday and
+      the source timestamp marks the end of that Los Angeles day, label 23:59
+      as a date-boundary estimate rather than an official minute-level promise.
+      Count down in seconds through the final 23:59 minute and show expected time
+      passed only at the following local 00:00:00. Every unresolved announcement
+      keeps a live Los Angeles weekday and 24-hour HH:mm:ss clock, including after
+      its estimate expires. Its estimated Beijing conversion shows only a weekday,
+      never an exact Beijing clock time. An explicitly stated clock time keeps its
+      actual deadline. Passing time, an absent source listing, ordinary weekly
+      refresh or reset-credit change never completes a notice; only linked source
+      completion or cancellation terminates it. Distinct pending notices retain
+      independent countdown cards without hiding weekly quota or reset credits.
+    rationale: A weekday-only Tibo post was displayed as a false minute-level reset promise; the user wants a useful estimated countdown and a persistent local reference clock.
+    source: user-request
+    owner: local-customization
+    risk: medium
+    scope:
+      include: [public-announcements, local-unread-state, macos-notifications, multiple-countdowns, notch-entry, interface-check-status]
+      exclude: [redeeming-credits, paid-services, model-polling, account-authentication, remote-publication, camera-geometry-redesign]
+    examples:
+      positive: Los Angeles Tuesday 23:59:30 shows 30 seconds left and local Tuesday 23:59:30; Wednesday 00:00:00 shows expected time passed and local Wednesday 00:00:00 until linked completion.
+      negative: Ending at Tuesday 23:59:00, displaying a Beijing minute on the estimate, treating a weekly reset as completion, or hiding the local clock while pending.
+    guards:
+      - Tests/CodexNotchTests/ResetAnnouncementSummaryTests.swift
+      - Tests/CodexNotchTests/ResetAnnouncementDisplayTests.swift
+      - Tests/CodexNotchTests/ResetNotificationTextTests.swift
+      - Tests/CodexNotchTests/ResetPendingAnnouncementsTests.swift
+      - Sources/CodexNotch/Announcements/ResetSelfCheck.swift
+      - "manual: verify live Los Angeles weekday and HH:mm:ss before and after expiry, two pending cards, weekly quota and reset credits"
+    supersedes: [RESET-ANNOUNCEMENTS-004]
     superseded_by: null
     last_verified_commit: null
 

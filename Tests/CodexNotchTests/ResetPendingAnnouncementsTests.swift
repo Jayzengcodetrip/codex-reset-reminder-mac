@@ -53,6 +53,43 @@ final class ResetPendingAnnouncementsTests: XCTestCase {
         XCTAssertFalse(restored.records[0].isUnread)
     }
 
+    func testTwoDateOnlyNoticesRemainIndependentAfterOneDeadlinePassesAndLedgerReloads() throws {
+        let parser = ISO8601DateFormatter()
+        let before = parser.date(from: "2026-09-23T06:58:30Z")!
+        let after = parser.date(from: "2026-09-23T07:00:00Z")!
+        let first = ResetAnnouncement(id: "tuesday", title: "周二重置预告", summary: "周二",
+            sourceURL: nil, announcedAt: before.addingTimeInterval(-3_600),
+            scheduledFor: parser.date(from: "2026-09-23T06:59:00Z")!,
+            kind: "regular", scope: "all", status: "scheduled")
+        let second = ResetAnnouncement(id: "wednesday", title: "周三重置预告", summary: "周三",
+            sourceURL: nil, announcedAt: before,
+            scheduledFor: parser.date(from: "2026-09-24T06:59:00Z")!,
+            kind: "regular", scope: "all", status: "scheduled")
+        var ledger = ResetLedger()
+        _ = ledger.ingest(NextResetSnapshot(announcements: [first, second], sourceCheckedAt: before,
+            sourceIsFresh: true), at: before, occurredWhileAway: false)
+        XCTAssertEqual(ledger.pendingAnnouncements.map(\.id), ["tuesday", "wednesday"])
+        XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: first, now: before, language: .chinese),
+                       "预计还剩 0小时1分30秒")
+
+        // Neither time passing nor a later source snapshot omitting both posts confirms either reset.
+        _ = ledger.ingest(NextResetSnapshot(announcements: [], sourceCheckedAt: after,
+            sourceIsFresh: true), at: after, occurredWhileAway: false)
+        let restored = try JSONDecoder().decode(ResetLedger.self, from: JSONEncoder().encode(ledger))
+        XCTAssertEqual(restored.pendingAnnouncements.map(\.id), ["tuesday", "wednesday"])
+        XCTAssertEqual(ResetAnnouncementSummary.countdownText(for: restored.pendingAnnouncements[0],
+            now: after, language: .chinese), "预计时间已过 · 等待确认")
+        XCTAssertTrue(ResetAnnouncementSummary.countdownText(for: restored.pendingAnnouncements[1],
+            now: after, language: .chinese).hasPrefix("预计还剩 "))
+
+        var completed = first
+        completed.status = "completed"
+        var revised = restored
+        _ = revised.ingest(NextResetSnapshot(announcements: [completed], sourceCheckedAt: after,
+            sourceIsFresh: true), at: after, occurredWhileAway: false)
+        XCTAssertEqual(revised.pendingAnnouncements.map(\.id), ["wednesday"])
+    }
+
     private func post(_ id: String, age: TimeInterval = 0) -> ResetAnnouncement {
         ResetAnnouncement(id: id, title: "预告", summary: "公开测试内容", sourceURL: nil,
             announcedAt: now.addingTimeInterval(-age), scheduledFor: now.addingTimeInterval(600),

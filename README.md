@@ -8,12 +8,12 @@ A free, native Mac app that shows your Codex quota, weekly reset countdown, rese
 
 ## What it shows
 
-- An announced temporary reset's Beijing-time target and live countdown when the public source provides a valid time. Multiple still-pending announcements retain separate countdowns. An announcement without a published time says that its time is unknown.
+- For a date-only or weekday-only temporary-reset announcement, a seconds-level countdown estimates the end of its Los Angeles day (the final minute, 23:59, ending at 00:00:00 the next day). A live Los Angeles clock shows only the weekday and 24-hour `HH:mm:ss` while that announcement remains pending, including after the estimate passes. Beijing is shown only as the corresponding weekday, without an estimated clock time. Explicitly timed announcements count down to their stated time; multiple pending announcements keep separate countdowns. An announcement without a usable date says that its time is unknown.
 - New or materially changed announcements in macOS notifications while you are using the Mac; updates found after wake, unlock, or network recovery remain unread in the app.
 - Remaining weekly quota, its reset time, available five-hour quota when returned by the account API, and each available reset credit's expiry when provided.
 - A small notch or top-of-screen panel that expands on hover and can be hidden or restored with **Option–Command–N**.
 
-The app checks the public source on launch and roughly every **two minutes** while running. Its first check establishes a quiet baseline for older announcements. It uses [NextReset](https://nextreset.net/)'s public API, not the paid X API. Delivery depends on the third-party source, connectivity, and polling; **a five-minute alert after an original X post is not guaranteed**. A posted target time is not proof that a reset has completed. Failed checks are shown as failures while previously saved announcements remain available.
+The app checks the public source on launch and roughly every **two minutes** while running. Its first check establishes a quiet baseline for older announcements. It uses [NextReset](https://nextreset.net/)'s public API, not the paid X API. Delivery depends on the third-party source, connectivity, and polling; **a five-minute alert after an original X post is not guaranteed**. Los Angeles is an app reference time zone, not an official reset time zone; 23:59 is an estimate for date-only announcements, not a published execution time. Passing that estimate does not prove that a reset has completed. Failed checks are shown as failures while previously saved announcements remain available.
 
 ## Install
 
@@ -30,7 +30,7 @@ The current build is **ad-hoc signed, not Apple Developer ID signed or notarized
 
 ## Data and trust boundary
 
-The app reads your local `CODEX_HOME/auth.json` token and sends it only to ChatGPT's usage and reset-credit endpoints (`chatgpt.com/backend-api/wham/usage` and `/rate-limit-reset-credits`). The public announcement requests to `https://nextreset.net/api/status` and `/api/resets` do **not** include that token. It reads local Codex session data for task activity and brief conversation titles. Public announcement history and unread flags are stored at `~/Library/Application Support/CodexNotch/reset-announcements.json`, without account tokens or quota responses. A manual update check reads public GitHub Release metadata.
+The app reads your local `CODEX_HOME/auth.json` token and sends it only to ChatGPT's usage and reset-credit endpoints (`chatgpt.com/backend-api/wham/usage` and `/rate-limit-reset-credits`). The public announcement requests to `https://nextreset.net/api/status` and `/api/resets` do **not** include that token. It reads local Codex session data for task activity and brief conversation titles. Public announcement history and unread flags are stored at `~/Documents/Codex/QuotaReminderState/announcements.json`, without account tokens or quota responses. A manual update check reads public GitHub Release metadata.
 
 ChatGPT usage endpoints are internal and may change. NextReset is an independent, third-party source that can lag or fail. Never post your `auth.json`, tokens, account ID, or private conversations in an issue.
 
