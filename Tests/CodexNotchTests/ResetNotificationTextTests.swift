@@ -15,7 +15,7 @@ final class ResetNotificationTextTests: XCTestCase {
         let body = ResetNotificationText.body(announcement: post(title: "有新的公告", scheduledFor: nil,
             status: "watch", now: now), now: now, count: 1)
         XCTAssertFalse(body.contains("还剩"))
-        XCTAssertTrue(body.contains("NextReset"))
+        XCTAssertTrue(body.contains("来源：公开重置公告"))
         XCTAssertTrue(body.contains("时间待公布"))
     }
 
