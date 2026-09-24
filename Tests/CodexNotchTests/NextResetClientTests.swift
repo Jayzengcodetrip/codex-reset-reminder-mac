@@ -158,8 +158,44 @@ final class NextResetClientTests: XCTestCase {
         defer { NextResetMockURLProtocol.handler = nil }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [NextResetMockURLProtocol.self]
-        let snapshot = try await NextResetClient(session: URLSession(configuration: config)).fetch()
+        let snapshot = try await NextResetClient(session: URLSession(configuration: config), includeDeliverySources: false).fetch()
         XCTAssertEqual(snapshot.announcements.count, 2)
+    }
+
+    func testAuxiliaryDeliveryIsMergedAndOptionalFailureKeepsPrimarySnapshot() async throws {
+        let statusBody = data(status()), archiveBody = data(archive())
+        let delivery = data(["data": [["id": "1002", "announced_at": "2026-09-22T18:00:00Z",
+            "reset_type": "banked", "text": "We are loading a banked reset into all accounts.",
+            "source": ["type": "x_post", "author": "thsottiaux", "url": "https://x.com/thsottiaux/status/1002"]]]])
+        var optionalFails = false
+        NextResetMockURLProtocol.handler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            XCTAssertFalse(request.httpShouldHandleCookies)
+            let body: Data
+            switch (request.url!.host!, request.url!.path) {
+            case ("nextreset.net", "/api/status"): body = statusBody
+            case ("nextreset.net", "/api/resets"): body = archiveBody
+            case ("codex-resets.com", "/api/v1/resets"):
+                if optionalFails { throw URLError(.timedOut) }
+                body = delivery
+            case ("nextreset.org", "/api/v1/events.json"): throw URLError(.timedOut)
+            default: throw URLError(.badURL)
+            }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
+        }
+        defer { NextResetMockURLProtocol.handler = nil }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [NextResetMockURLProtocol.self]
+        let client = NextResetClient(session: URLSession(configuration: config))
+        let merged = try await client.fetch()
+        XCTAssertEqual(merged.announcements.count, 3)
+        XCTAssertEqual(merged.announcements.first(where: { $0.id == "1002" })?.status, "rolling_out")
+        optionalFails = true
+        let fallback = try await client.fetch()
+        XCTAssertEqual(fallback.announcements.count, 2)
+        XCTAssertEqual(fallback.sourceCheckedAt, merged.sourceCheckedAt)
     }
 
     private func status() -> [String: Any] {

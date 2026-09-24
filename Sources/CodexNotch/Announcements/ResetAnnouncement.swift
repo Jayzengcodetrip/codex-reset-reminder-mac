@@ -11,11 +11,17 @@ struct ResetAnnouncement: Codable, Identifiable, Equatable {
     var kind: String
     var scope: String
     var status: String?
+    var deliveryAt: Date? = nil
+    var relatedAnnouncementIDs: [String]? = nil
+    var deliveryKind: String? = nil
+    var completionEvidence: String? = nil
 
     func hasSameMaterialContent(as other: ResetAnnouncement) -> Bool {
         title == other.title && summary == other.summary
             && scheduledFor == other.scheduledFor && kind == other.kind
             && scope == other.scope && status == other.status
+            && deliveryAt == other.deliveryAt && relatedAnnouncementIDs == other.relatedAnnouncementIDs
+            && deliveryKind == other.deliveryKind && completionEvidence == other.completionEvidence
     }
 }
 

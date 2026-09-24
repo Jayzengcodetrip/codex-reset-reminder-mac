@@ -259,7 +259,7 @@ enum ResetSelfCheck {
                   "A time correction updates and notifies the existing card without inventing another preannouncement")
         let utc = ISO8601DateFormatter().date(from: "2026-09-12T20:09:00Z")!
         try check(ResetAnnouncementDisplay.beijingDate(utc) == "2026-09-13 04:09", "Beijing dates must convert correctly across UTC dates")
-        return checks + (try ResetAnnouncementSummary.runSelfChecks()) + (try ResetCheckPresentation.runSelfChecks())
+        return checks + (try ResetTopCycleSelfCheck.run()) + (try ResetAnnouncementSummary.runSelfChecks()) + (try ResetCheckPresentation.runSelfChecks())
             + (try ResetPendingAnnouncements.runSelfChecks())
     }
 

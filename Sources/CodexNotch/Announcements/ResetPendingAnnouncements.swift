@@ -23,6 +23,7 @@ enum ResetPendingAnnouncements {
                 if idRoot != postRoot { parents[idRoot] = postRoot }
             }
         }
+        let deliveries = current.filter { isTerminal($0) && $0.deliveryAt != nil }
         let groups = Dictionary(grouping: current) { root("id:\($0.id)") }
         return groups.values.compactMap { group -> ResetAnnouncement? in
             let terminal = group.filter { announcement in
@@ -33,6 +34,12 @@ enum ResetPendingAnnouncements {
             }
             return group.filter { announcement in
                 guard !isTerminal(announcement), isPending(announcement, history: versions[announcement.id, default: []]) else { return false }
+                if deliveries.contains(where: { delivery in
+                    let ids = delivery.relatedAnnouncementIDs ?? []
+                    let postID = announcement.sourceURL?.lastPathComponent
+                    return (ids.contains(announcement.id) || postID.map(ids.contains) == true)
+                        && (delivery.deliveryAt ?? .distantPast) >= (announcement.announcedAt ?? .distantPast)
+                }) { return false }
                 return !terminal.contains {
                     ($0.announcedAt ?? .distantPast) >= (announcement.announcedAt ?? .distantPast)
                 }
@@ -71,7 +78,7 @@ enum ResetPendingAnnouncements {
     }
 
     private static let pendingStatuses: Set<String> = ["scheduled", "announced", "watch", "pending"]
-    private static let terminalStatuses: Set<String> = ["completed", "confirmed", "propagated", "cancelled", "canceled"]
+    private static let terminalStatuses: Set<String> = ["completed", "confirmed", "propagated", "rolling_out", "cancelled", "canceled"]
 
     private static func status(_ announcement: ResetAnnouncement) -> String {
         announcement.status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""

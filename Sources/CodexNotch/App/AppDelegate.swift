@@ -85,9 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeCoordinator?.start()
         let experience = ResetExperienceCoordinator()
         resetExperience = experience
-        experience.onStatusChange = { [weak self] unread, away, status, announcements in
+        experience.onStatusChange = { [weak self] unread, away, status, announcements, records in
             self?.runtimeCoordinator?.updateResetAnnouncements(
-                unread: unread, awayUnread: away, status: status, announcements: announcements
+                unread: unread, awayUnread: away, status: status, announcements: announcements, records: records
             )
         }
         runtimeCoordinator?.onOpenResetAnnouncements = { [weak experience] in

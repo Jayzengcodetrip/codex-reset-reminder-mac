@@ -4,18 +4,7 @@ import Foundation
 /// Source health belongs beside this summary, not in place of a known deadline.
 struct ResetAnnouncementSummary: Equatable {
     static func select(from records: [ResetRecord], now: Date) -> ResetAnnouncement? {
-        let announcements = records.map(\.announcement)
-        let terminal = announcements.filter { isTerminal($0) }
-        let pending = announcements.filter { announcement in
-            guard !isTerminal(announcement),
-                  announcement.scheduledFor != nil || pendingStatuses.contains(status(announcement)) else { return false }
-            // A general completion with another post ID may concern another reset or cohort.
-            // Only an explicitly shared post identity can retire a separate saved preannouncement.
-            return !terminal.contains { completion in
-                samePost(completion, announcement)
-                    && (completion.announcedAt ?? .distantPast) >= (announcement.announcedAt ?? .distantPast)
-            }
-        }
+        let pending = ResetPendingAnnouncements.pending(from: records)
         return pending.sorted { left, right in
             let leftDeadline = ResetScheduleTiming.target(for: left)?.countdownDeadline
             let rightDeadline = ResetScheduleTiming.target(for: right)?.countdownDeadline
@@ -49,6 +38,9 @@ struct ResetAnnouncementSummary: Equatable {
 
     static func countdownText(for announcement: ResetAnnouncement, now: Date, language: AppLanguage) -> String {
         let state = status(announcement)
+        if state == "rolling_out" {
+            return language.localized(chinese: "官方已开始发放重置福利", english: "Official reset rollout has started")
+        }
         if cancelledStatuses.contains(state) {
             return language.localized(chinese: "临时重置已取消", english: "Temporary reset cancelled")
         }
@@ -93,7 +85,7 @@ struct ResetAnnouncementSummary: Equatable {
         ResetScheduleTiming.targetText(for: announcement, now: now, language: language)
     }
 
-    private static let completedStatuses: Set<String> = ["completed", "confirmed", "propagated"]
+    private static let completedStatuses: Set<String> = ["completed", "confirmed", "propagated", "rolling_out"]
     private static let cancelledStatuses: Set<String> = ["cancelled", "canceled"]
     private static let pendingStatuses: Set<String> = ["scheduled", "announced", "watch", "pending"]
 

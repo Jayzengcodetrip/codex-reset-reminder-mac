@@ -17,8 +17,10 @@ enum NextResetError: Error, LocalizedError {
 struct NextResetClient {
     let session: URLSession
     let baseURL: URL
+    let includeDeliverySources: Bool
 
-    init(session: URLSession? = nil, baseURL: URL = URL(string: "https://nextreset.net")!) {
+    init(session: URLSession? = nil, baseURL: URL = URL(string: "https://nextreset.net")!,
+         includeDeliverySources: Bool = true) {
         if let session { self.session = session } else {
             let configuration = URLSessionConfiguration.ephemeral
             configuration.httpCookieStorage = nil
@@ -28,23 +30,38 @@ struct NextResetClient {
             self.session = URLSession(configuration: configuration)
         }
         self.baseURL = baseURL
+        self.includeDeliverySources = includeDeliverySources
     }
 
     func fetch() async throws -> NextResetSnapshot {
-        async let status = get("api/status")
-        async let archive = get("api/resets")
-        return try await Self.decode(status: status, archive: archive)
+        async let status = get(baseURL.appendingPathComponent("api/status"))
+        async let archive = get(baseURL.appendingPathComponent("api/resets"))
+        async let events = optionalDeliveryData("https://nextreset.org/api/v1/events.json")
+        async let history = optionalDeliveryData("https://codex-resets.com/api/v1/resets?limit=100")
+        let primary = try await Self.decode(status: status, archive: archive)
+        let delivery = await ResetDeliveryEvidence.announcements(eventsData: events, historyData: history)
+        return NextResetSnapshot(
+            announcements: ResetDeliveryEvidence.merge(base: primary.announcements, supplements: delivery),
+            sourceCheckedAt: primary.sourceCheckedAt, sourceIsFresh: primary.sourceIsFresh
+        )
     }
 
-    private func get(_ path: String) async throws -> Data {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+    private func optionalDeliveryData(_ address: String) async -> Data? {
+        guard includeDeliverySources, let url = URL(string: address) else { return nil }
+        return try? await get(url, timeout: 12)
+    }
+
+    private func get(_ url: URL, timeout: TimeInterval = 25) async throws -> Data {
+        var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = 25
+        request.timeoutInterval = timeout
+        request.httpShouldHandleCookies = false
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("CodexNotch-ResetWatch/1.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw NextResetError.invalidResponse }
         guard (200...299).contains(http.statusCode) else { throw NextResetError.httpStatus(http.statusCode) }
+        guard data.count <= 2_000_000 else { throw NextResetError.invalidDocument }
         return data
     }
 
@@ -118,7 +135,8 @@ struct NextResetClient {
             scheduledFor: try date(object, keys: scheduledDateKeys),
             kind: string(object, keys: ["kind"]) ?? "unspecified",
             scope: string(object, keys: ["scope"]) ?? "unspecified",
-            status: string(object, keys: ["status"]) ?? defaultStatus
+            status: string(object, keys: ["status"]) ?? defaultStatus,
+            deliveryAt: try date(object, keys: ["deliveredAt", "delivered_at", "completedAt", "completed_at", "confirmedAt", "confirmed_at"])
         )
     }
 

@@ -41,7 +41,10 @@ enum ResetNotificationText {
     static func body(announcement: ResetAnnouncement, now: Date, count: Int) -> String {
         var lines: [String] = []
         let normalizedStatus = announcement.status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        if ["completed", "confirmed", "propagated"].contains(normalizedStatus) {
+        if normalizedStatus == "rolling_out" {
+            lines.append("官方已开始发放重置福利")
+            lines.append(announcement.title)
+        } else if ["completed", "confirmed", "propagated"].contains(normalizedStatus) {
             lines.append("来源已确认重置完成")
             lines.append(announcement.title)
         } else if ["cancelled", "canceled"].contains(normalizedStatus) {
@@ -75,7 +78,7 @@ enum ResetNotificationText {
             lines.append(announcement.title)
         }
         if count > 1 { lines.append("共 \(count) 条更新，点击查看") }
-        lines.append("来源：NextReset 公开接口")
+        lines.append("来源：公开重置公告；点击查看原帖")
         return lines.joined(separator: "\n")
     }
 }
@@ -83,7 +86,7 @@ enum ResetNotificationText {
 @MainActor
 final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelegate {
     let monitor: ResetMonitor
-    var onStatusChange: ((Int, Int, String, [ResetAnnouncement]) -> Void)?
+    var onStatusChange: ((Int, Int, String, [ResetAnnouncement], [ResetRecord]) -> Void)?
     var onShowSummary: (() -> Void)?
     private let notificationCenter = UNUserNotificationCenter.current()
     private var detailWindow: NSWindow?
@@ -174,7 +177,7 @@ final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelega
             language: AppLanguage.fromStoredValue(UserDefaults.standard.string(forKey: AppLanguage.storageKey)),
             hasNewPreannouncement: monitor.hasNewPreannouncement
         )
-        onStatusChange?(monitor.unreadCount, monitor.awayUnreadCount, status, pending)
+        onStatusChange?(monitor.unreadCount, monitor.awayUnreadCount, status, pending, monitor.records)
     }
 
     private func notify(_ records: [ResetRecord]) {

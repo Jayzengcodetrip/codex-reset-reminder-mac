@@ -8,6 +8,8 @@ struct ResetAnnouncementEntriesView: View {
     let announcements: [ResetAnnouncement]
     let now: Date
     let language: AppLanguage
+    var didResetToday: Bool = false
+    var secondsSinceLastDelivery: Int? = nil
     let action: () -> Void
 
     static func height(for count: Int) -> CGFloat {
@@ -32,14 +34,14 @@ struct ResetAnnouncementEntriesView: View {
             if announcements.isEmpty {
                 ResetAnnouncementEntryView(unreadCount: unreadCount, awayUnreadCount: awayUnreadCount,
                     statusText: statusText, announcement: nil,
-                    now: now, language: language, action: action)
+                    now: now, language: language, didResetToday: didResetToday, secondsSinceLastDelivery: secondsSinceLastDelivery, action: action)
             } else {
                 ForEach(Array(announcements.reversed()), id: \.id) { announcement in
                     ResetAnnouncementEntryView(
                         unreadCount: announcement.id == announcements.last?.id ? unreadCount : 0,
                         awayUnreadCount: announcement.id == announcements.last?.id ? awayUnreadCount : 0,
                         statusText: statusText, announcement: announcement,
-                        now: now, language: language, action: action)
+                        now: now, language: language, didResetToday: didResetToday, secondsSinceLastDelivery: secondsSinceLastDelivery, action: action)
                 }
             }
         }
@@ -57,6 +59,8 @@ struct ResetAnnouncementEntryView: View {
     let announcement: ResetAnnouncement?
     let now: Date
     let language: AppLanguage
+    var didResetToday: Bool = false
+    var secondsSinceLastDelivery: Int? = nil
     let action: () -> Void
 
     private var title: String {
@@ -67,22 +71,10 @@ struct ResetAnnouncementEntryView: View {
             }
             return heading + (unreadCount > 0 ? language.localized(chinese: " · 有未读更新", english: " · Unread updates") : "")
         }
-        if awayUnreadCount > 0 {
-            return language.localized(
-                chinese: "离开期间有 \(awayUnreadCount) 条重置动态",
-                english: "\(awayUnreadCount) reset updates while away"
-            )
-        }
-        if unreadCount > 0 {
-            return language.localized(
-                chinese: "\(unreadCount) 条新的重置动态",
-                english: "\(unreadCount) new reset updates"
-            )
-        }
-        return language.localized(chinese: "临时重置公告", english: "Temporary reset announcements")
+        return ResetTopPresentation(announcements: [], didResetToday: didResetToday, secondsSinceLastDelivery: secondsSinceLastDelivery).emptyText(language: language)
     }
 
-    private var highlighted: Bool { announcement != nil || unreadCount > 0 }
+    private var highlighted: Bool { announcement != nil }
 
     private var accessibilityText: String {
         guard let announcement else { return title + "，" + statusText }
@@ -149,11 +141,21 @@ struct ResetAnnouncementEntryView: View {
                             .foregroundStyle(Color.white.opacity(0.9))
                             .lineLimit(1)
                     } else {
-                        Text(title)
+                        Text(title.replacingOccurrences(of: "（", with: "\n（"))
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(unreadCount > 0 ? Color.orange : Color.white)
-                            .lineLimit(1)
+                            .monospacedDigit()
+                            .multilineTextAlignment(.leading)
+                            .foregroundStyle(didResetToday ? Color.green : Color.white)
+                            .lineLimit(2)
                             .minimumScaleFactor(0.85)
+                    }
+                    if announcement == nil && unreadCount > 0 {
+                        Text(awayUnreadCount > 0
+                            ? language.localized(chinese: "离开期间有 \(awayUnreadCount) 条更新 · 点击查看", english: "\(awayUnreadCount) updates while away · View history")
+                            : language.localized(chinese: "\(unreadCount) 条未读动态 · 点击查看", english: "\(unreadCount) unread updates · View history"))
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(Color.orange)
+                            .lineLimit(1)
                     }
                     Text(statusText)
                         .font(.system(size: announcement == nil ? 10.5 : 9.5))
@@ -249,10 +251,12 @@ struct ResetAnnouncementsView: View {
                 .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
             }
             Divider()
-            Text(label(
-                "公开来源 NextReset · 北京时间 UTC+8 · 按接口更新提醒",
-                "Public source: NextReset · Beijing time UTC+8 · Alerts follow source updates"
-            ))
+            HStack(spacing: 8) {
+                Link("NextReset", destination: URL(string: "https://nextreset.net")!)
+                Link("Codex Resets", destination: URL(string: "https://codex-resets.com")!)
+                Link("NextReset.org", destination: URL(string: "https://nextreset.org")!)
+                Text(label("· 按公开接口更新提醒", "· Alerts follow public sources"))
+            }
             .font(.system(size: 10.5))
             .foregroundStyle(.secondary)
             .padding(.vertical, 10)
@@ -501,6 +505,14 @@ private struct ResetAnnouncementDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if let evidence = announcement.completionEvidence {
+                    Text(label("发放判定依据：", "Delivery evidence: ") + evidence)
+                        .font(.system(size: 10)).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                if announcement.deliveryAt != nil {
+                    Link("Data from Codex Resets", destination: URL(string: "https://codex-resets.com")!)
+                        .font(.system(size: 10))
+                }
                 if !announcement.scope.isEmpty {
                     Text(label("适用范围：", "Scope: ") + ResetAnnouncementDisplay.scopeText(announcement.scope, language: language))
                         .font(.system(size: 11))
@@ -547,6 +559,9 @@ enum ResetAnnouncementDisplay {
     }
 
     static func timingText(_ announcement: ResetAnnouncement, now: Date, language: AppLanguage) -> String {
+        if announcement.status?.lowercased() == "rolling_out" {
+            return language.localized(chinese: "官方已开始发放重置福利", english: "Official reset rollout has started")
+        }
         if isCompleted(announcement) {
             return language.localized(chinese: "来源已确认重置完成", english: "Source confirms the reset is complete")
         }

@@ -66,13 +66,15 @@ final class NotchRuntimeCoordinator {
 
     var onOpenResetAnnouncements: (() -> Void)?
 
-    func updateResetAnnouncements(unread: Int, awayUnread: Int, status: String, announcements: [ResetAnnouncement] = []) {
-        let priorHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetPreannouncements.count)
+    func updateResetAnnouncements(unread: Int, awayUnread: Int, status: String, announcements: [ResetAnnouncement] = [], records: [ResetRecord] = []) {
+        let priorHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation.announcements.count)
         viewModel.resetUnreadCount = unread
         viewModel.resetAwayUnreadCount = awayUnread
         viewModel.resetStatusText = status
         viewModel.resetPreannouncements = announcements
-        if started && priorHeight != ResetAnnouncementEntriesView.height(for: announcements.count) { render() }
+        viewModel.resetRecords = records
+        viewModel.updateClock(now: nowProvider())
+        if started && priorHeight != ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation.announcements.count) { render() }
     }
 
     /// Open the existing card without changing the user's persistent visibility preference.
@@ -230,10 +232,18 @@ final class NotchRuntimeCoordinator {
 
     private func handleTimerTick() {
         let now = nowProvider()
+        advanceClock(now: now)
         pollSessions()
         if now.timeIntervalSince(lastUsageRequestAt ?? .distantPast) >= Self.usageRefreshInterval {
             refreshUsage()
         }
+    }
+
+    private func advanceClock(now: Date) {
+        let oldHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation.announcements.count)
+        viewModel.updateClock(now: now)
+        let newHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation.announcements.count)
+        if oldHeight != newHeight { render(now: now) }
     }
 
     private func pollSessions() {
@@ -246,7 +256,8 @@ final class NotchRuntimeCoordinator {
             await MainActor.run { [weak self] in
                 guard let self, sequence > self.lastAppliedSnapshotSequence else { return }
                 self.lastAppliedSnapshotSequence = sequence
-                self.apply(snapshot: snapshot, now: now)
+                // Session reads are asynchronous; their capture time must not rewind the card clock.
+                self.apply(snapshot: snapshot, now: self.nowProvider())
             }
         }
     }
@@ -254,7 +265,7 @@ final class NotchRuntimeCoordinator {
     private func apply(snapshot: ActiveSessionStoreSnapshot, now: Date) {
         guard started else { return }
         guard snapshot != lastSessionSnapshot else {
-            viewModel.updateClock(now: now)
+            advanceClock(now: now)
             refreshTitlesIfNeeded(now: now)
             return
         }
@@ -548,6 +559,7 @@ final class NotchRuntimeCoordinator {
 
     private func render(now: Date? = nil) {
         let renderDate = now ?? nowProvider()
+        viewModel.updateClock(now: renderDate)
         let preferences = runtimePreferences
         guard let screen = preferredScreen() else {
             resetHoverState()
@@ -632,11 +644,11 @@ final class NotchRuntimeCoordinator {
             quotaExpandedSize: quotaExpandedContentSize(
                 for: displayState,
                 isResetScheduleExpanded: isResetScheduleExpanded
-            ).addingResetAnnouncementEntry(count: viewModel.resetPreannouncements.count),
+            ).addingResetAnnouncementEntry(count: viewModel.resetTopPresentation.announcements.count),
             expandedSize: expandedContentSize(
                 for: displayState,
                 isResetScheduleExpanded: isResetScheduleExpanded
-            ).addingResetAnnouncementEntry(count: viewModel.resetPreannouncements.count)
+            ).addingResetAnnouncementEntry(count: viewModel.resetTopPresentation.announcements.count)
         )
         let targetFrame = layout.frame(for: displayState)
         // The controller allocates the final canvas before the SwiftUI state

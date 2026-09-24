@@ -15,6 +15,10 @@ final class NotchViewModel: ObservableObject {
     @Published var resetAwayUnreadCount = 0
     @Published var resetStatusText = "正在检查重置公告…"
     @Published var resetPreannouncements: [ResetAnnouncement] = []
+    @Published var resetRecords: [ResetRecord] = []
+    var resetTopPresentation: ResetTopPresentation {
+        ResetTopPresentation.make(pending: resetPreannouncements, records: resetRecords, now: now)
+    }
 
     var onOpenResetAnnouncements: () -> Void = {}
 
@@ -323,7 +327,9 @@ struct NotchView: View {
                     resetUnreadCount: model.resetUnreadCount,
                     resetAwayUnreadCount: model.resetAwayUnreadCount,
                     resetStatusText: model.resetStatusText,
-                    resetPreannouncements: model.resetPreannouncements,
+                    resetPreannouncements: model.resetTopPresentation.announcements,
+                    resetToday: model.resetTopPresentation.didResetToday,
+                    resetElapsedSeconds: model.resetTopPresentation.secondsSinceLastDelivery,
                     onOpenResetAnnouncements: model.onOpenResetAnnouncements,
                     onActivateChatGPT: model.onActivateChatGPT,
                     onOpenThread: model.onOpenThread,
@@ -1373,6 +1379,8 @@ private struct ExpandedNotchView: View {
     let resetAwayUnreadCount: Int
     let resetStatusText: String
     let resetPreannouncements: [ResetAnnouncement]
+    let resetToday: Bool
+    let resetElapsedSeconds: Int?
     let onOpenResetAnnouncements: () -> Void
     let onActivateChatGPT: () -> Void
     let onOpenThread: (String) -> Void
@@ -1414,6 +1422,8 @@ private struct ExpandedNotchView: View {
                 announcements: resetPreannouncements,
                 now: now,
                 language: language,
+                didResetToday: resetToday,
+                secondsSinceLastDelivery: resetElapsedSeconds,
                 action: onOpenResetAnnouncements
             )
             .padding(.bottom, 8)
