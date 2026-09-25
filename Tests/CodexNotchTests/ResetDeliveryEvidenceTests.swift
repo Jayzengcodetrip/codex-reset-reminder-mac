@@ -302,8 +302,9 @@ final class ResetDeliveryEvidenceTests: XCTestCase {
         XCTAssertEqual(ledger.records.first(where: { $0.id == "4003" })?.isUnread, false)
         XCTAssertEqual(ledger.records.first(where: { $0.id == "4003" })?.occurredWhileAway, false)
         var laterRevision = delivery("4001")
-        laterRevision.summary += " A material follow-up after the baseline."
-        XCTAssertEqual(ledger.ingest(snapshot([laterRevision]), at: cutoff.addingTimeInterval(360), occurredWhileAway: false).map(\.id), ["4001"])
+        laterRevision.summary += " More original text for the same known delivery."
+        XCTAssertTrue(ledger.ingest(snapshot([laterRevision]), at: cutoff.addingTimeInterval(360), occurredWhileAway: false).isEmpty)
+        XCTAssertEqual(ledger.records.first(where: { $0.id == "4001" })?.announcement.summary, laterRevision.summary)
     }
 
     private func snapshot(_ announcements: [ResetAnnouncement]) -> NextResetSnapshot {

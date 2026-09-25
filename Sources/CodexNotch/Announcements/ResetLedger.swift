@@ -53,14 +53,15 @@ struct ResetLedger: Codable, Equatable {
                     // Stale intermediary caches must not replay a previously seen version.
                     if versions[announcement.id, default: []].contains(where: { announcement.hasSameMaterialContent(as: $0) }) { continue }
                     versions[announcement.id, default: [prior.announcement]].append(announcement)
+                    let silentUpdate = historicalDelivery || announcement.supplementsKnownDelivery(prior.announcement)
                     let record = ResetRecord(
                         id: announcement.id, announcement: announcement,
-                        isUnread: historicalDelivery ? prior.isUnread : true,
-                        occurredWhileAway: historicalDelivery ? prior.occurredWhileAway
+                        isUnread: silentUpdate ? prior.isUnread : true,
+                        occurredWhileAway: silentUpdate ? prior.occurredWhileAway
                             : prior.isUnread && prior.occurredWhileAway || occurredWhileAway
                     )
                     records[existingIndex] = record
-                    if !historicalDelivery { changed.append(record) }
+                    if !silentUpdate { changed.append(record) }
                 } else {
                     // Non-material source metadata may improve without replaying a notification.
                     records[existingIndex].announcement = announcement
@@ -77,12 +78,7 @@ struct ResetLedger: Codable, Equatable {
                 if unread && !establishingBaseline { changed.append(record) }
             }
         }
-        records.sort { lhs, rhs in
-            if lhs.isUnread != rhs.isUnread { return lhs.isUnread }
-            let left = lhs.announcement.announcedAt ?? .distantPast
-            let right = rhs.announcement.announcedAt ?? .distantPast
-            return left == right ? lhs.id > rhs.id : left > right
-        }
+        sortByPublicationDate()
         baselineCompleted = true
         // Failed/unavailable auxiliary sources must not consume their first-run baseline.
         if establishingDeliveryBaseline { deliveryEvidenceBaselineCompleted = true }
@@ -139,6 +135,17 @@ struct ResetLedger: Codable, Equatable {
         guard let index = records.firstIndex(where: { $0.id == id }) else { return }
         records[index].isUnread = false
         records[index].occurredWhileAway = false
+        sortByPublicationDate()
+    }
+
+    /// Unread/away have their own filters. The history must not make an older
+    /// announcement look newer merely because its details were supplemented.
+    mutating func sortByPublicationDate() {
+        records.sort { lhs, rhs in
+            let left = lhs.announcement.announcedAt ?? .distantPast
+            let right = rhs.announcement.announcedAt ?? .distantPast
+            return left == right ? lhs.id > rhs.id : left > right
+        }
     }
 }
 
@@ -152,8 +159,9 @@ struct ResetLedgerStore: ResetLedgerStoring {
 
     func load() throws -> ResetLedger? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let ledger = try JSONDecoder().decode(ResetLedger.self, from: Data(contentsOf: url))
+        var ledger = try JSONDecoder().decode(ResetLedger.self, from: Data(contentsOf: url))
         guard ledger.schemaVersion == 1 else { throw NextResetError.invalidSavedState }
+        ledger.sortByPublicationDate()
         return ledger
     }
 

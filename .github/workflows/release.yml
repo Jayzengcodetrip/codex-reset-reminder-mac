@@ -13,7 +13,7 @@ jobs:
   release:
     runs-on: macos-15
     env:
-      RELEASE_TAG: v0.2.2
+      RELEASE_TAG: v0.2.3
     steps:
       - uses: actions/checkout@v4
       - name: Confirm Apple Silicon runner
@@ -51,4 +51,4 @@ jobs:
             dist/CodexNotch-*.sha256 \
             "${target_option[@]}" \
             --title "Codex 重置提醒 ${RELEASE_TAG}" \
-            --notes-file docs/releases/v0.2.2.md
+            --notes-file docs/releases/v0.2.3.md

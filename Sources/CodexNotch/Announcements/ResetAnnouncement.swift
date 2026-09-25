@@ -20,8 +20,25 @@ struct ResetAnnouncement: Codable, Identifiable, Equatable {
         title == other.title && summary == other.summary
             && scheduledFor == other.scheduledFor && kind == other.kind
             && scope == other.scope && status == other.status
-            && deliveryAt == other.deliveryAt && relatedAnnouncementIDs == other.relatedAnnouncementIDs
-            && deliveryKind == other.deliveryKind && completionEvidence == other.completionEvidence
+            && deliveryAt == other.deliveryAt && Set(relatedAnnouncementIDs ?? []) == Set(other.relatedAnnouncementIDs ?? [])
+            && deliveryKind == other.deliveryKind
+        // completionEvidence describes provenance, not a new reset or a changed deadline.
+        // Keep it in the saved details without reopening or notifying the announcement.
+    }
+
+    /// Starting delivery already completes the user's reminder. A richer original
+    /// post or a stronger completion label for the same delivery is a quiet update.
+    func supplementsKnownDelivery(_ other: ResetAnnouncement) -> Bool {
+        let deliveredStatuses: Set<String> = ["rolling_out", "completed", "confirmed", "propagated"]
+        func delivered(_ value: ResetAnnouncement) -> Bool {
+            deliveredStatuses.contains(value.status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "")
+        }
+        return deliveryAt != nil && deliveryAt == other.deliveryAt
+            && delivered(self) && delivered(other)
+            && scheduledFor == other.scheduledFor && kind == other.kind && scope == other.scope
+            && deliveryKind == other.deliveryKind
+            && Set(relatedAnnouncementIDs ?? []) == Set(other.relatedAnnouncementIDs ?? [])
+            && ResetDeliveryEvidence.isGeneralDelivery(self) == ResetDeliveryEvidence.isGeneralDelivery(other)
     }
 }
 

@@ -91,6 +91,110 @@ final class ResetLedgerTests: XCTestCase {
         XCTAssertEqual(try store.load(), ledger)
     }
 
+    func testOldDeliveryEvidenceExplanationUpdatesSilentlyAcrossReloads() throws {
+        var old = announcement("old-delivery")
+        old.announcedAt = now.addingTimeInterval(-47 * 86_400)
+        old.deliveryAt = old.announcedAt
+        old.deliveryKind = "regular"
+        old.status = "completed"
+        old.completionEvidence = "官方原帖明确宣布已开始发放或已发放。"
+        var ledger = ResetLedger()
+        _ = ledger.ingest(snapshot([old]), at: now, occurredWhileAway: false)
+        var enriched = old
+        enriched.completionEvidence = "公开事件中的官方发放证据与原预告明确关联。"
+        for incoming in [enriched, old, enriched] {
+            ledger = try JSONDecoder().decode(ResetLedger.self, from: JSONEncoder().encode(ledger))
+            XCTAssertTrue(ledger.ingest(snapshot([incoming]), at: now, occurredWhileAway: true).isEmpty)
+            XCTAssertFalse(ledger.records[0].isUnread)
+            XCTAssertFalse(ledger.records[0].occurredWhileAway)
+            XCTAssertEqual(ledger.records[0].announcement.completionEvidence, incoming.completionEvidence)
+        }
+    }
+
+    func testSameKnownDeliveryCanGainFullTextAndCompletionWithoutNewAlert() {
+        var old = announcement("old-delivery")
+        old.deliveryAt = now.addingTimeInterval(-47 * 86_400)
+        old.status = "rolling_out"
+        old.deliveryKind = "regular"
+        var ledger = ResetLedger()
+        _ = ledger.ingest(snapshot([old]), at: now, occurredWhileAway: false)
+        old.status = "completed"
+        old.summary = "We have reset usage limits for all users. Full original post."
+        XCTAssertTrue(ledger.ingest(snapshot([old]), at: now, occurredWhileAway: false).isEmpty)
+        XCTAssertEqual(ledger.records[0].announcement.summary, old.summary)
+        XCTAssertEqual(ledger.records[0].announcement.status, "completed")
+        XCTAssertFalse(ledger.records[0].isUnread)
+        old.status = "cancelled"
+        old.summary = "发放已取消。"
+        XCTAssertEqual(ledger.ingest(snapshot([old]), at: now, occurredWhileAway: false).map(\.id), [old.id])
+    }
+
+    func testSameDeliverySupplementPreservesExistingUnreadAndAwayFlags() {
+        var ledger = ResetLedger()
+        _ = ledger.ingest(snapshot([]), at: now, occurredWhileAway: false)
+        var delivery = announcement("new-delivery")
+        delivery.deliveryAt = now.addingTimeInterval(1)
+        delivery.status = "rolling_out"
+        delivery.deliveryKind = "banked"
+        XCTAssertEqual(ledger.ingest(snapshot([delivery]), at: now.addingTimeInterval(2), occurredWhileAway: true).count, 1)
+        delivery.status = "completed"
+        XCTAssertTrue(ledger.ingest(snapshot([delivery]), at: now.addingTimeInterval(3), occurredWhileAway: false).isEmpty)
+        XCTAssertTrue(ledger.records[0].isUnread)
+        XCTAssertTrue(ledger.records[0].occurredWhileAway)
+    }
+
+    func testNewDeliveryRelationsRemainMaterialEvenForKnownDelivery() {
+        var delivery = announcement("delivery")
+        delivery.deliveryAt = now
+        delivery.status = "completed"
+        var pending = announcement("pending-preview")
+        pending.status = "scheduled"
+        pending.scheduledFor = now.addingTimeInterval(600)
+        var ledger = ResetLedger()
+        _ = ledger.ingest(snapshot([delivery, pending]), at: now, occurredWhileAway: false)
+        XCTAssertEqual(ledger.pendingAnnouncements.map(\.id), [pending.id])
+        delivery.relatedAnnouncementIDs = ["pending-preview"]
+        XCTAssertEqual(ledger.ingest(snapshot([delivery]), at: now, occurredWhileAway: false).count, 1)
+        XCTAssertTrue(ledger.pendingAnnouncements.isEmpty)
+        XCTAssertTrue(ledger.ingest(snapshot([delivery]), at: now, occurredWhileAway: false).isEmpty)
+    }
+
+    func testNewDeliveryAfterAuxiliaryBaselineStillNotifiesExactlyOnce() {
+        var old = announcement("old-delivery")
+        old.deliveryAt = now.addingTimeInterval(-86_400)
+        old.status = "completed"
+        var ledger = ResetLedger()
+        _ = ledger.ingest(snapshot([old]), at: now, occurredWhileAway: false)
+        XCTAssertEqual(ledger.deliveryEvidenceBaselineCompleted, true)
+        var new = announcement("new-delivery")
+        new.announcedAt = now.addingTimeInterval(60)
+        new.deliveryAt = new.announcedAt
+        new.status = "rolling_out"
+        XCTAssertEqual(ledger.ingest(snapshot([new]), at: now.addingTimeInterval(120), occurredWhileAway: false).map(\.id), [new.id])
+        XCTAssertTrue(ledger.ingest(snapshot([new]), at: now.addingTimeInterval(240), occurredWhileAway: false).isEmpty)
+    }
+
+    func testHistoryStaysInPublicationOrderEvenWhenOlderItemIsUnread() throws {
+        var recent = announcement("recent")
+        recent.announcedAt = now
+        var old = announcement("old")
+        old.announcedAt = now.addingTimeInterval(-47 * 86_400)
+        var ledger = ResetLedger()
+        _ = ledger.ingest(snapshot([old, recent]), at: now, occurredWhileAway: false)
+        old.summary = "更正历史摘要"
+        _ = ledger.ingest(snapshot([old]), at: now, occurredWhileAway: false)
+        XCTAssertEqual(ledger.records.map(\.id), [recent.id, old.id])
+        XCTAssertEqual(ledger.records.filter(\.isUnread).map(\.id), [old.id])
+        ledger.markRead(id: old.id)
+        XCTAssertEqual(ledger.records.map(\.id), [recent.id, old.id])
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = ResetLedgerStore(url: folder.appendingPathComponent("ledger.json"))
+        ledger.records.reverse() // Legacy saved unread-first order.
+        try store.save(ledger)
+        XCTAssertEqual(try store.load()?.records.map(\.id), [recent.id, old.id])
+    }
+
     private func announcement(_ id: String) -> ResetAnnouncement {
         ResetAnnouncement(id: id, title: "额度更新", summary: "以原公告适用范围为准", sourceURL: nil,
                           announcedAt: now.addingTimeInterval(-1000), scheduledFor: nil, kind: "regular", scope: "unspecified", status: nil)
