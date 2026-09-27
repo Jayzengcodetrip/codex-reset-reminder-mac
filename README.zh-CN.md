@@ -4,6 +4,8 @@
 
 [**下载最新版**](https://github.com/Jayzengcodetrip/codex-reset-reminder-mac/releases/latest) · [查看源码](https://github.com/Jayzengcodetrip/codex-reset-reminder-mac) · [English](README.md)
 
+接口中没有官方原帖和公告身份的站方预测，不作为正式重置预告，不生成倒计时，也不会阻断正式公告检查；正式公告本身格式损坏时，应用仍会如实显示检查失败。
+
 > 适用于 **macOS 14 或更新版本、Apple Silicon（arm64）Mac**。这是社区制作的应用，不是 OpenAI、Codex、X 或 NextReset 的官方产品。
 
 ## 它能做什么

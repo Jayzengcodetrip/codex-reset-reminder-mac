@@ -87,6 +87,9 @@ struct NextResetClient {
             else if let objects = value as? [[String: Any]] { values = objects }
             else { throw NextResetError.invalidDocument }
             for object in values {
+                // `watch` also carries the provider's own forecast, without an official source post.
+                // It is not an announcement or a reset deadline; keep validating all real events.
+                if key == "watch", isProviderWatchSignal(object) { continue }
                 let defaultStatus: String? = key == "scheduled" ? "scheduled" : key == "latest_confirmed_reset" ? "completed" : nil
                 let announcement = try parseAnnouncement(statusPayload(object), defaultStatus: defaultStatus)
                 announcements[announcement.id] = announcement
@@ -100,6 +103,19 @@ struct NextResetClient {
             sourceCheckedAt: metadata.compactMap(\.checkedAt).min(),
             sourceIsFresh: metadata.allSatisfy(\.fresh)
         )
+    }
+
+    private static func isProviderWatchSignal(_ object: [String: Any]) -> Bool {
+        let identityKeys = ["event", "id", "sourceId", "source_id", "title"]
+        guard identityKeys.allSatisfy({ !object.keys.contains($0) }),
+              ["sourceUrl", "sourceURL", "source_url", "url"].allSatisfy({ key in
+                  guard let value = object[key], !(value is NSNull) else { return true }
+                  return (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true
+              }),
+              string(object, keys: ["level"]) != nil,
+              string(object, keys: ["window", "excerpt"]) != nil,
+              (try? date(object, keys: ["observedAt", "expiresAt"])) != nil else { return false }
+        return true
     }
 
     /// Status can wrap the source post in `event`, keeping its reset deadline on the envelope.

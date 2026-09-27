@@ -182,7 +182,7 @@ enum ResetDeliveryEvidence {
             #"\b(?:we|i)\s+(?:are|am)\s+(?:once\s+again\s+|now\s+)?resetting\s+(?:the\s+)?(?:usage|rate|limits)\b"#,
             #"\b(?:we|i)\s+(?:are|am)\s+(?:now\s+)?reseting\s+(?:the\s+)?(?:usage|rate|limits)\b"#,
             #"\b(?:usage|rate)\s+limits\s+(?:have|has)\s+(?:now\s+)?been\s+reset\b"#,
-            #"^\s*(?:reset\s+(?:has\s+been\s+)?(?:all\s+)?propagated|all\s+reset\s+for\s+everyone|reset\s+button\s+pressed)\b"#
+            #"^\s*(?:resets?\s+(?:(?:has|have)\s+been\s+)?(?:all\s+)?propagated|all\s+reset\s+for\s+everyone|reset\s+button\s+pressed)\b"#
         ]
         for sentence in sentences {
             for (kind, patterns) in [("banked", banked), ("regular", direct)] {

@@ -25,6 +25,30 @@ final class ResetDeliveryEvidenceTests: XCTestCase {
         XCTAssertEqual(result.first(where: { $0.id == "1003" })?.deliveryKind, "regular")
     }
 
+    func testPluralPropagatedResetsAreDeliveryButFutureNegatedAndQuotedClaimsAreNot() {
+        let completed = ["Resets all propagated. Have a fantastic weekend.", "Reset all propagated.",
+                         "Resets have been all propagated.", "Reset has been propagated."]
+        let result = parse(completed.enumerated().map { post(String(1200 + $0.offset), text: $0.element) })
+        XCTAssertEqual(result.count, completed.count)
+        XCTAssertTrue(result.allSatisfy { $0.deliveryKind == "regular" && $0.deliveryAt == date("2026-09-22T18:23:37Z") })
+        let unconfirmed = ["Resets will all propagate tomorrow.", "Resets have not all propagated.",
+                           "Resets have not been all propagated.", "Someone said resets all propagated.",
+                           "If resets all propagated, let us know.", "\"Resets all propagated\" is what people expect."]
+        XCTAssertTrue(parse(unconfirmed.enumerated().map { post(String(1300 + $0.offset), text: $0.element) }).isEmpty)
+    }
+
+    func testUnscheduledPreviewsCannotBeClosedByUnrelatedPropagatedDelivery() throws {
+        let delivery = try XCTUnwrap(parse([post("1002", text: "Resets all propagated.")]).first)
+        var earlier = planned("1001")
+        earlier.scheduledFor = nil
+        earlier.summary = "We will reset usage limits."
+        var later = planned("1003")
+        later.scheduledFor = nil
+        later.announcedAt = delivery.announcedAt?.addingTimeInterval(3600)
+        later.summary = "More resets coming next week."
+        XCTAssertNil(ResetDeliveryEvidence.associate([delivery], pending: [earlier, later]).first?.relatedAnnouncementIDs)
+    }
+
     func testFutureNegatedIndirectAndUnknownTextDoesNotBecomeDelivery() {
         let invalid = [
             "We will do the full banked reset today. Lands end of day.",

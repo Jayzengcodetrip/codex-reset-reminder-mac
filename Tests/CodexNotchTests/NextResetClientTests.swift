@@ -125,6 +125,58 @@ final class NextResetClientTests: XCTestCase {
         XCTAssertEqual(result.sourceCheckedAt, ISO8601DateFormatter().date(from: "2026-09-12T13:07:27Z"))
     }
 
+    func testProviderWatchForecastDoesNotBlockOfficialAnnouncementsOrCreateADeadline() throws {
+        var object = status()
+        object["watch"] = watchSignal()
+        let result = try NextResetClient.decode(status: data(object), archive: data(archive()))
+        XCTAssertEqual(Set(result.announcements.map(\.id)), ["old", "planned"])
+        XCTAssertEqual(result.announcements.first(where: { $0.id == "planned" })?.scheduledFor,
+                       ISO8601DateFormatter().date(from: "2026-09-13T07:00:00Z"))
+        object["scheduled"] = NSNull()
+        let noPreview = try NextResetClient.decode(status: data(object), archive: data(archive()))
+        XCTAssertEqual(noPreview.announcements.map(\.id), ["old"])
+        XCTAssertTrue(noPreview.announcements.allSatisfy { $0.scheduledFor == nil })
+    }
+
+    func testMixedWatchSignalsKeepWrappedAndFlatOfficialEvents() throws {
+        var object = status()
+        object["watch"] = [watchSignal(), ["event": announcement("wrapped-watch")], announcement("flat-watch")]
+        let result = try NextResetClient.decode(status: data(object), archive: data(archive()))
+        XCTAssertEqual(Set(result.announcements.map(\.id)), ["old", "planned", "wrapped-watch", "flat-watch"])
+    }
+
+    func testProviderForecastShapeCannotHideMalformedOfficialWatch() {
+        let identities: [String: Any] = ["event": NSNull(), "id": "missing-title", "sourceId": "missing-title",
+                                       "source_id": "missing-title", "title": "Missing identity",
+                                       "sourceUrl": "https://x.com/thsottiaux/status/1001",
+                                       "sourceURL": "https://x.com/thsottiaux/status/1001",
+                                       "source_url": "https://x.com/thsottiaux/status/1001",
+                                       "url": "https://x.com/thsottiaux/status/1001"]
+        for (key, value) in identities {
+            var watch = watchSignal()
+            watch[key] = value
+            var object = status()
+            object["watch"] = watch
+            XCTAssertThrowsError(try NextResetClient.decode(status: data(object), archive: data(archive())))
+        }
+    }
+
+    func testForecastExceptionIsRestrictedToRecognizedWatchSignals() {
+        for key in ["scheduled", "latest_update", "latest_confirmed_reset", "latest_broad_reset"] {
+            var object = status()
+            object[key] = watchSignal()
+            XCTAssertThrowsError(try NextResetClient.decode(status: data(object), archive: data(archive())))
+        }
+        XCTAssertThrowsError(try NextResetClient.decode(status: data(status()),
+            archive: data(["data": [watchSignal()], "meta": meta()])))
+        for watch in [["level": "strong"], ["unknown": "shape"],
+                      ["level": "strong", "window": "next week", "observedAt": "not a date"]] {
+            var object = status()
+            object["watch"] = watch
+            XCTAssertThrowsError(try NextResetClient.decode(status: data(object), archive: data(archive())))
+        }
+    }
+
     func testMalformedOrPartialArchiveFailsInsteadOfLookingLikeNoNews() {
         XCTAssertThrowsError(try NextResetClient.decode(status: data(status()), archive: data(["meta": meta()])))
         XCTAssertThrowsError(try NextResetClient.decode(status: data(status()), archive: data(["data": [["id": "missing-title"]], "meta": meta()])))
@@ -203,6 +255,11 @@ final class NextResetClientTests: XCTestCase {
         planned["scheduledFor"] = "2026-09-13T07:00:00Z"
         return ["latest_update": announcement("old"), "latest_confirmed_reset": announcement("old"),
                 "scheduled": planned, "watch": NSNull(), "meta": meta()]
+    }
+    private func watchSignal() -> [String: Any] {
+        ["level": "strong", "chance": NSNull(), "window": "around a future developer event",
+         "observedAt": "2026-09-12T10:39:35.426Z", "expiresAt": "2026-09-16T06:59:59.999Z",
+         "sourceUrl": NSNull(), "excerpt": "We expect a possible reset around the event."]
     }
     private func archive() -> [String: Any] { ["data": [announcement("old")], "meta": meta()] }
     private func announcement(_ id: String, title: [String: String] = ["zh": "重置已完成", "en": "Reset complete"]) -> [String: Any] {
