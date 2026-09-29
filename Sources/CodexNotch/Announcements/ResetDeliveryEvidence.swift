@@ -20,6 +20,66 @@ enum ResetDeliveryEvidence {
         deliveryKind(in: announcement.summary) != nil
     }
 
+    /// Presentation-only compatibility: a later broad official delivery makes
+    /// an older undated preview stop occupying the home card. This does not
+    /// assert an event relationship or alter either announcement's lifecycle.
+    static func canArchiveUndated(_ announcement: ResetAnnouncement,
+                                  after delivery: ResetAnnouncement, now: Date) -> Bool {
+        guard announcement.scheduledFor == nil,
+              !terminalStatuses.contains(normalized(announcement.status)),
+              !targetedScopes.contains(normalized(announcement.scope)),
+              !isSeparateBenefit(announcement.title + " " + announcement.summary),
+              let announcedAt = announcement.announcedAt,
+              let previewPost = officialPost(announcement.sourceURL),
+              let deliveryPost = officialPost(delivery.sourceURL),
+              previewPost.author == deliveryPost.author, previewPost.id != deliveryPost.id,
+              isGeneralDelivery(delivery),
+              let deliveredAt = deliveryTimestamp(delivery),
+              deliveredAt > announcedAt, deliveredAt <= now,
+              delivery.announcedAt.map({ $0 <= now }) != false else { return false }
+
+        guard deliveryScopeCoversPreview(delivery.scope, previewScope: announcement.scope) else { return false }
+
+        // `regular` on legacy previews is a provider's generic category, not
+        // an explicit promise of an automatic one-time reset.
+        let requestedKind = promisedKind(announcement.title + " " + announcement.summary)
+            ?? explicitPreviewKind(announcement.kind)
+        let issuedKind = canonicalDeliveryKind(delivery.deliveryKind)
+            ?? deliveryKind(in: delivery.summary) ?? canonicalDeliveryKind(delivery.kind)
+        return requestedKind == nil || issuedKind == "both" || requestedKind == issuedKind
+    }
+
+    static func deliveryTimestamp(_ announcement: ResetAnnouncement) -> Date? {
+        announcement.deliveryAt ?? (announcement.scheduledFor == nil ? announcement.announcedAt : nil)
+    }
+
+    private static func deliveryScopeCoversPreview(_ deliveryScope: String, previewScope: String) -> Bool {
+        let broadScopes: Set<String> = ["", "unspecified", "broad", "all", "global", "general"]
+        let knownProductScopes: Set<String> = ["codex", "chatgpt"]
+        let issued = normalized(deliveryScope), preview = normalized(previewScope)
+        // Unknown explicit labels may denote a limited audience. Do not treat
+        // matching unknown labels, or a broad label on the other side, as proof.
+        guard broadScopes.contains(issued) || knownProductScopes.contains(issued),
+              broadScopes.contains(preview) || knownProductScopes.contains(preview) else { return false }
+        // Legacy unspecified delivery scope has already passed general-delivery
+        // evidence checks. A known narrow product rollout, however, can only
+        // cover the same narrow preview; it cannot retire an all-users preview.
+        return broadScopes.contains(issued) || issued == preview
+    }
+
+    private static func explicitPreviewKind(_ kind: String) -> String? {
+        switch normalized(kind) {
+        case "banked": return "banked"
+        case "direct", "one_time", "one-time", "automatic_global", "automatic", "global": return "regular"
+        case "both": return "both"
+        default: return nil
+        }
+    }
+
+    private static func canonicalDeliveryKind(_ kind: String?) -> String? {
+        normalized(kind) == "regular" ? "regular" : explicitPreviewKind(kind ?? "")
+    }
+
     /// An unlinked delivery can close only a unique compatible announcement on its LA target day.
     /// This is an explicit local inference, never a relationship claimed by the source.
     static func associate(_ announcements: [ResetAnnouncement], pending: [ResetAnnouncement]) -> [ResetAnnouncement] {

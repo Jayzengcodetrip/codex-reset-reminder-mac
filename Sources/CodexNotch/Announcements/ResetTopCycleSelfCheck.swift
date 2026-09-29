@@ -121,8 +121,86 @@ enum ResetTopCycleSelfCheck {
         try check(ResetTopPresentation.make(pending: [exact], records: [], now: date("2026-09-23T07:00:00Z")).announcements.isEmpty,
                   "Exact deadline stops displaying at its LA day end")
         let unknown = post("5001", scheduled: nil)
-        try check(ResetTopPresentation.make(pending: [unknown], records: [], now: date("2026-10-01T07:00:00Z")).announcements.count == 1,
-                  "Unknown date cannot acquire an invented expiry")
+        let undated = ResetTopPresentation.make(pending: [unknown], records: [], now: date("2026-10-01T07:00:00Z"))
+        try check(undated.announcements.isEmpty && undated.undatedAnnouncements == [unknown],
+                  "Unknown date belongs to its own active group without an invented expiry")
+
+        let olderUndated = post("6001", scheduled: nil, published: "2026-09-21T10:00:00Z")
+        let secondUndated = post("6002", scheduled: nil, published: "2026-09-22T10:00:00Z")
+        let newerUndated = post("6003", scheduled: nil, published: "2026-09-22T21:00:00Z")
+        let broadDelivery = try delivery("6004", text: "We are loading a banked reset into all accounts.")
+        var undatedLedger = ResetLedger()
+        _ = undatedLedger.ingest(snapshot([secondUndated, olderUndated]), at: date("2026-09-22T10:01:00Z"), occurredWhileAway: false)
+        try check(top(undatedLedger, "2026-09-22T19:00:00Z").undatedAnnouncements.map(\.id) == ["6001", "6002"],
+                  "Undated notices must remain oldest-first before delivery")
+        _ = undatedLedger.ingest(snapshot([broadDelivery]), at: date("2026-09-22T20:01:00Z"), occurredWhileAway: false)
+        let savedUndated = undatedLedger
+        let archived = top(undatedLedger, "2026-09-22T20:01:00Z")
+        try check(archived.announcements.isEmpty && archived.undatedAnnouncements.isEmpty,
+                  "Later general delivery must clear old undated notices from both home groups")
+        try check(archived.archivedUndated == [olderUndated.id: broadDelivery, secondUndated.id: broadDelivery],
+                  "Both old undated notices retain their presentation-only delivery reason")
+        try check(undatedLedger == savedUndated && undatedLedger.pendingAnnouncements.count == 2,
+                  "Presentation archival must not change the ledger or its unresolved state")
+        try check(undatedLedger.records.first(where: { $0.id == broadDelivery.id })?.announcement.relatedAnnouncementIDs == nil,
+                  "An undated archival reason must not fabricate a completion relationship")
+        undatedLedger = try JSONDecoder().decode(ResetLedger.self, from: JSONEncoder().encode(undatedLedger))
+        try check(top(undatedLedger, "2026-09-22T20:01:00Z") == archived,
+                  "Undated grouping must survive ledger reload")
+        try check(undatedLedger.ingest(snapshot([]), at: date("2026-09-22T20:02:00Z"), occurredWhileAway: true).isEmpty,
+                  "Empty polls must not notify after undated archival")
+        try check(undatedLedger.ingest(snapshot([olderUndated, secondUndated, broadDelivery]),
+                                      at: date("2026-09-22T20:03:00Z"), occurredWhileAway: true).isEmpty,
+                  "Unchanged polls must not notify after undated archival")
+        _ = undatedLedger.ingest(snapshot([newerUndated]), at: date("2026-09-22T21:01:00Z"), occurredWhileAway: false)
+        try check(top(undatedLedger, "2026-09-22T21:01:00Z").undatedAnnouncements == [newerUndated],
+                  "A preview published after delivery must remain active")
+        var gainedDate = olderUndated
+        gainedDate.title = "周三重置预告"
+        gainedDate.summary = "A reset on Wednesday."
+        gainedDate.scheduledFor = date("2026-09-24T06:59:00Z")
+        _ = undatedLedger.ingest(snapshot([gainedDate]), at: date("2026-09-22T21:02:00Z"), occurredWhileAway: false)
+        let afterDateAdded = top(undatedLedger, "2026-09-22T21:02:00Z")
+        try check(afterDateAdded.announcements == [gainedDate] && afterDateAdded.archivedUndated[gainedDate.id] == nil,
+                  "Adding a real date must move a formerly archived preview back to its countdown")
+        var excludedDeliveries: [ResetAnnouncement] = []
+        for source in [nil, "https://example.com/thsottiaux/status/6004", "https://x.com/not_official/status/6004"] as [String?] {
+            var untrusted = broadDelivery
+            untrusted.sourceURL = source.flatMap(URL.init(string:))
+            excludedDeliveries.append(untrusted)
+        }
+        var futureDelivery = broadDelivery
+        futureDelivery.deliveryAt = date("2026-09-22T22:00:00Z")
+        excludedDeliveries.append(futureDelivery)
+        var targetedDelivery = broadDelivery
+        targetedDelivery.scope = "limited"
+        excludedDeliveries.append(targetedDelivery)
+        for excluded in excludedDeliveries {
+            try check(!ResetDeliveryEvidence.canArchiveUndated(olderUndated, after: excluded, now: date("2026-09-22T21:00:00Z")),
+                      "Future, targeted or untrusted delivery must not archive an undated preview")
+        }
+        var missingPublication = olderUndated
+        missingPublication.announcedAt = nil
+        try check(!ResetDeliveryEvidence.canArchiveUndated(missingPublication, after: broadDelivery, now: date("2026-09-22T21:00:00Z")),
+                  "Undated notices without publication time cannot be ordered against delivery")
+        var directPromise = olderUndated
+        directPromise.summary = "A one-time reset is coming."
+        try check(!ResetDeliveryEvidence.canArchiveUndated(directPromise, after: broadDelivery, now: date("2026-09-22T21:00:00Z")),
+                  "An explicitly direct-only preview is incompatible with a banked-only delivery")
+        for (previewScope, deliveryScope, shouldArchive) in [
+            ("broad", "chatgpt", false), ("all", "chatgpt", false),
+            ("codex", "all", true), ("chatgpt", "broad", true),
+            ("codex", "chatgpt", false), ("all", "unknown-segment", false),
+            ("unknown-segment", "all", false), ("unknown-segment", "unknown-segment", false)
+        ] {
+            var scopedPreview = olderUndated
+            scopedPreview.scope = previewScope
+            var scopedDelivery = broadDelivery
+            scopedDelivery.scope = deliveryScope
+            try check(ResetDeliveryEvidence.canArchiveUndated(scopedPreview, after: scopedDelivery,
+                now: date("2026-09-22T21:00:00Z")) == shouldArchive,
+                "Delivery scope must cover preview directionally: \(previewScope) -> \(deliveryScope)")
+        }
         for (seconds, expected) in [(271, "00:04:31"), (83071, "23:04:31"),
                                     (86791, "1天00:06:31"), (504451, "5天20:07:31"),
                                     (86399, "23:59:59"), (86400, "1天00:00:00")] {

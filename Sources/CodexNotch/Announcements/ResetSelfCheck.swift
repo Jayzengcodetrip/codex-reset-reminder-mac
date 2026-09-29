@@ -226,6 +226,10 @@ enum ResetSelfCheck {
                   "An active announcement must reserve room for its live Los Angeles clock")
         try check(ResetAnnouncementEntriesView.height(for: 2) == 284 && ResetAnnouncementEntriesView.height(for: 5) == 284,
                   "Two countdowns fit above quota and further countdowns scroll within bounded height")
+        try check(ResetAnnouncementEntriesView.height(timedCount: 0, hasUndated: true, hasDelivery: true) == 162,
+                  "Undated previews share a compact summary with an independent delivery clock")
+        try check(ResetAnnouncementEntriesView.height(timedCount: 5, hasUndated: true, hasDelivery: true) == 284,
+                  "Mixed announcement content must stay bounded above weekly quota and credits")
         let pendingStore = CheckStore()
         var pendingPosts = [advance]
         var pendingNotifications = 0

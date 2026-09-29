@@ -86,6 +86,7 @@ enum ResetNotificationText {
 @MainActor
 final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelegate {
     let monitor: ResetMonitor
+    private let announcementNavigation = ResetAnnouncementsNavigation()
     var onStatusChange: ((Int, Int, String, [ResetAnnouncement], [ResetRecord]) -> Void)?
     var onShowSummary: (() -> Void)?
     private let notificationCenter = UNUserNotificationCenter.current()
@@ -159,13 +160,20 @@ final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelega
             window.title = "重置公告 · 额度提醒"
             window.minSize = NSSize(width: 640, height: 600)
             window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: ResetAnnouncementsView(monitor: monitor))
+            window.contentView = NSHostingView(rootView: ResetAnnouncementsView(
+                monitor: monitor, navigation: announcementNavigation
+            ))
             window.center()
             detailWindow = window
         }
         NSApp.activate(ignoringOtherApps: true)
         detailWindow?.makeKeyAndOrderFront(nil)
         // Opening the window itself must not mark any announcement read.
+    }
+
+    func showUndatedAnnouncements() {
+        announcementNavigation.showUndatedAnnouncements()
+        showAnnouncements()
     }
 
     private func publishStatus() {

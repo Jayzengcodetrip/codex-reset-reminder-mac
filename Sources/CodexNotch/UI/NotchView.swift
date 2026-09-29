@@ -21,6 +21,7 @@ final class NotchViewModel: ObservableObject {
     }
 
     var onOpenResetAnnouncements: () -> Void = {}
+    var onOpenUndatedAnnouncements: () -> Void = {}
 
     var onOpenThread: (String) -> Void
     var onActivateChatGPT: () -> Void
@@ -328,9 +329,11 @@ struct NotchView: View {
                     resetAwayUnreadCount: model.resetAwayUnreadCount,
                     resetStatusText: model.resetStatusText,
                     resetPreannouncements: model.resetTopPresentation.announcements,
+                    resetUndatedAnnouncements: model.resetTopPresentation.undatedAnnouncements,
                     resetToday: model.resetTopPresentation.didResetToday,
                     resetElapsedSeconds: model.resetTopPresentation.secondsSinceLastDelivery,
                     onOpenResetAnnouncements: model.onOpenResetAnnouncements,
+                    onOpenUndatedAnnouncements: model.onOpenUndatedAnnouncements,
                     onActivateChatGPT: model.onActivateChatGPT,
                     onOpenThread: model.onOpenThread,
                     onResetScheduleExpandedChanged: model.onResetScheduleExpandedChanged,
@@ -1379,9 +1382,11 @@ private struct ExpandedNotchView: View {
     let resetAwayUnreadCount: Int
     let resetStatusText: String
     let resetPreannouncements: [ResetAnnouncement]
+    let resetUndatedAnnouncements: [ResetAnnouncement]
     let resetToday: Bool
     let resetElapsedSeconds: Int?
     let onOpenResetAnnouncements: () -> Void
+    let onOpenUndatedAnnouncements: () -> Void
     let onActivateChatGPT: () -> Void
     let onOpenThread: (String) -> Void
     let onResetScheduleExpandedChanged: (Bool) -> Void
@@ -1420,11 +1425,13 @@ private struct ExpandedNotchView: View {
                 awayUnreadCount: resetAwayUnreadCount,
                 statusText: resetStatusText,
                 announcements: resetPreannouncements,
+                undatedAnnouncements: resetUndatedAnnouncements,
                 now: now,
                 language: language,
                 didResetToday: resetToday,
                 secondsSinceLastDelivery: resetElapsedSeconds,
-                action: onOpenResetAnnouncements
+                action: onOpenResetAnnouncements,
+                undatedAction: onOpenUndatedAnnouncements
             )
             .padding(.bottom, 8)
 

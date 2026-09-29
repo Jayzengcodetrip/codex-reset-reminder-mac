@@ -65,16 +65,17 @@ final class NotchRuntimeCoordinator {
     private var visibilityShortcut: NotchVisibilityShortcut?
 
     var onOpenResetAnnouncements: (() -> Void)?
+    var onOpenUndatedAnnouncements: (() -> Void)?
 
     func updateResetAnnouncements(unread: Int, awayUnread: Int, status: String, announcements: [ResetAnnouncement] = [], records: [ResetRecord] = []) {
-        let priorHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation.announcements.count)
+        let priorHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation)
         viewModel.resetUnreadCount = unread
         viewModel.resetAwayUnreadCount = awayUnread
         viewModel.resetStatusText = status
         viewModel.resetPreannouncements = announcements
         viewModel.resetRecords = records
         viewModel.updateClock(now: nowProvider())
-        if started && priorHeight != ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation.announcements.count) { render() }
+        if started && priorHeight != ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation) { render() }
     }
 
     /// Open the existing card without changing the user's persistent visibility preference.
@@ -144,6 +145,10 @@ final class NotchRuntimeCoordinator {
         }
         viewModel.onOpenResetAnnouncements = { [weak self] in
             self?.onOpenResetAnnouncements?()
+        }
+
+        viewModel.onOpenUndatedAnnouncements = { [weak self] in
+            self?.onOpenUndatedAnnouncements?()
         }
 
         windowController.onScreenParametersChanged = { [weak self] in
@@ -240,9 +245,9 @@ final class NotchRuntimeCoordinator {
     }
 
     private func advanceClock(now: Date) {
-        let oldHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation.announcements.count)
+        let oldHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation)
         viewModel.updateClock(now: now)
-        let newHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation.announcements.count)
+        let newHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation)
         if oldHeight != newHeight { render(now: now) }
     }
 
@@ -644,11 +649,11 @@ final class NotchRuntimeCoordinator {
             quotaExpandedSize: quotaExpandedContentSize(
                 for: displayState,
                 isResetScheduleExpanded: isResetScheduleExpanded
-            ).addingResetAnnouncementEntry(count: viewModel.resetTopPresentation.announcements.count),
+            ).addingResetAnnouncementEntry(presentation: viewModel.resetTopPresentation),
             expandedSize: expandedContentSize(
                 for: displayState,
                 isResetScheduleExpanded: isResetScheduleExpanded
-            ).addingResetAnnouncementEntry(count: viewModel.resetTopPresentation.announcements.count)
+            ).addingResetAnnouncementEntry(presentation: viewModel.resetTopPresentation)
         )
         let targetFrame = layout.frame(for: displayState)
         // The controller allocates the final canvas before the SwiftUI state
@@ -788,7 +793,7 @@ final class NotchRuntimeCoordinator {
 }
 
 private extension NSSize {
-    func addingResetAnnouncementEntry(count: Int) -> NSSize {
-        NSSize(width: width, height: height + ResetAnnouncementEntriesView.height(for: count) + 8)
+    func addingResetAnnouncementEntry(presentation: ResetTopPresentation) -> NSSize {
+        NSSize(width: width, height: height + ResetAnnouncementEntriesView.height(for: presentation) + 8)
     }
 }

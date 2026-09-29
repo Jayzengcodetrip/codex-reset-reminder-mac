@@ -96,9 +96,177 @@ final class ResetTopPresentationTests: XCTestCase {
         XCTAssertTrue(state(pending: [exact], at: "2026-09-23T07:00:00Z").announcements.isEmpty)
     }
 
-    func testUnknownScheduleRemainsVisible() {
+    func testUnknownScheduleRemainsInUndatedGroupWithoutInventingExpiry() {
         let unknown = post(scheduled: nil, status: "watch")
-        XCTAssertEqual(state(pending: [unknown], at: "2026-10-01T07:00:00Z").announcements, [unknown])
+        let result = state(pending: [unknown], at: "2026-10-01T07:00:00Z")
+        XCTAssertTrue(result.announcements.isEmpty)
+        XCTAssertEqual(result.undatedAnnouncements, [unknown])
+        XCTAssertTrue(result.archivedUndated.isEmpty)
+    }
+
+    func testLaterGeneralDeliveryArchivesTwoOlderUndatedPreviewsOnlyInPresentation() {
+        let first = official(post("1001", scheduled: nil, status: "watch", published: "2026-09-21T10:00:00Z"))
+        let second = official(post("1002", scheduled: nil, status: "announced", published: "2026-09-22T10:00:00Z"))
+        let delivered = official(post("2001", scheduled: nil, status: "rolling_out", kind: "banked",
+                                      published: "2026-09-22T20:00:00Z", delivery: "2026-09-22T20:00:00Z"))
+        let records = [first, second, delivered]
+        let result = state(pending: [second, first], records: records, at: "2026-09-22T21:00:00Z")
+        XCTAssertTrue(result.announcements.isEmpty)
+        XCTAssertTrue(result.undatedAnnouncements.isEmpty)
+        XCTAssertEqual(result.archivedUndated, [first.id: delivered, second.id: delivered])
+        XCTAssertEqual(ResetPendingAnnouncements.pending(from: records.map(record)).map(\.id), [first.id, second.id])
+        XCTAssertNil(delivered.relatedAnnouncementIDs)
+        XCTAssertEqual(first.status, "watch")
+        XCTAssertEqual(second.status, "announced")
+    }
+
+    func testUndatedAfterDeliveryStaysActiveAndGroupsSortOldestFirst() {
+        let earlier = official(post("1001", scheduled: nil, published: "2026-09-22T21:00:00Z"))
+        let later = official(post("1002", scheduled: nil, published: "2026-09-22T22:00:00Z"))
+        let sameInstant = official(post("1003", scheduled: nil, published: "2026-09-22T20:00:00Z"))
+        let delivered = official(post("2001", scheduled: nil, status: "completed",
+                                      published: "2026-09-22T20:00:00Z", delivery: "2026-09-22T20:00:00Z"))
+        let result = state(pending: [later, earlier, sameInstant], records: [delivered], at: "2026-09-22T23:00:00Z")
+        XCTAssertEqual(result.undatedAnnouncements.map(\.id), [sameInstant.id, earlier.id, later.id])
+        XCTAssertTrue(result.archivedUndated.isEmpty)
+    }
+
+    func testUntrustedFutureTargetedOrIncompleteDeliveryDoesNotArchiveUndated() {
+        let preview = official(post("1001", scheduled: nil, published: "2026-09-22T10:00:00Z"))
+        let delivered = official(post("2001", scheduled: nil, status: "rolling_out",
+                                      published: "2026-09-22T20:00:00Z", delivery: "2026-09-22T20:00:00Z"))
+        var invalid: [ResetAnnouncement] = []
+        for source in [nil, "https://example.com/thsottiaux/status/2001", "https://x.com/another/status/2001",
+                       "https://x.com/thsottiaux", "http://x.com/thsottiaux/status/2001"] as [String?] {
+            var copy = delivered
+            copy.sourceURL = source.flatMap(URL.init(string:))
+            invalid.append(copy)
+        }
+        var future = delivered
+        future.deliveryAt = date("2026-09-22T22:00:00Z")
+        invalid.append(future)
+        var unpublished = delivered
+        unpublished.announcedAt = date("2026-09-22T22:00:00Z")
+        invalid.append(unpublished)
+        for scope in ["limited", "affected", "selected"] {
+            var copy = delivered
+            copy.scope = scope
+            invalid.append(copy)
+        }
+        var compensation = delivered
+        compensation.summary = "We have reset usage limits to compensate affected users."
+        invalid.append(compensation)
+        var pendingDelivery = delivered
+        pendingDelivery.status = "scheduled"
+        invalid.append(pendingDelivery)
+        var unknownDate = delivered
+        unknownDate.deliveryAt = nil
+        unknownDate.announcedAt = nil
+        invalid.append(unknownDate)
+        for evidence in invalid {
+            let result = state(pending: [preview], records: [evidence], at: "2026-09-22T21:00:00Z")
+            XCTAssertEqual(result.undatedAnnouncements, [preview])
+            XCTAssertTrue(result.archivedUndated.isEmpty)
+        }
+        var missingPublication = preview
+        missingPublication.announcedAt = nil
+        XCTAssertEqual(state(pending: [missingPublication], records: [delivered], at: "2026-09-22T21:00:00Z")
+            .undatedAnnouncements, [missingPublication])
+    }
+
+    func testUndatedTypeAndExplicitScopeMustBeCompatible() {
+        let preview = official(post("1001", scheduled: nil, published: "2026-09-22T10:00:00Z"))
+        var banked = official(post("2001", scheduled: nil, status: "rolling_out", kind: "banked",
+                                   published: "2026-09-22T20:00:00Z", delivery: "2026-09-22T20:00:00Z"))
+        banked.deliveryKind = "banked"
+        // The old regular provider category does not mean an explicitly promised direct reset.
+        XCTAssertEqual(state(pending: [preview], records: [banked], at: "2026-09-22T21:00:00Z").archivedUndated[preview.id], banked)
+        var directOnly = preview
+        directOnly.summary = "A one-time reset is coming."
+        XCTAssertEqual(state(pending: [directOnly], records: [banked], at: "2026-09-22T21:00:00Z").undatedAnnouncements, [directOnly])
+        var bankedOnly = preview
+        bankedOnly.kind = "banked"
+        var direct = banked
+        direct.kind = "regular"
+        direct.deliveryKind = "regular"
+        XCTAssertEqual(state(pending: [bankedOnly], records: [direct], at: "2026-09-22T21:00:00Z").undatedAnnouncements, [bankedOnly])
+        var both = banked
+        both.deliveryKind = "both"
+        XCTAssertEqual(state(pending: [directOnly], records: [both], at: "2026-09-22T21:00:00Z").archivedUndated[preview.id], both)
+        var codexOnly = preview
+        codexOnly.scope = "codex"
+        var differentScope = banked
+        differentScope.scope = "chatgpt"
+        XCTAssertEqual(state(pending: [codexOnly], records: [differentScope], at: "2026-09-22T21:00:00Z").undatedAnnouncements, [codexOnly])
+    }
+
+    func testDatedNoticeNeverUsesUndatedArchivalRuleAndCanReturnAfterDateAdded() throws {
+        var preview = official(post("1001", scheduled: nil, status: "watch", published: "2026-09-22T10:00:00Z"))
+        let delivered = official(post("2001", scheduled: nil, status: "rolling_out",
+                                      published: "2026-09-22T20:00:00Z", delivery: "2026-09-22T20:00:00Z"))
+        XCTAssertNotNil(state(pending: [preview], records: [delivered], at: "2026-09-22T21:00:00Z").archivedUndated[preview.id])
+        preview.title = "周三重置预告"
+        preview.summary = "A reset on Wednesday."
+        preview.scheduledFor = date("2026-09-24T06:59:00Z")
+        let result = state(pending: [preview], records: [delivered], at: "2026-09-22T21:00:00Z")
+        XCTAssertEqual(result.announcements, [preview])
+        XCTAssertTrue(result.undatedAnnouncements.isEmpty)
+        XCTAssertTrue(result.archivedUndated.isEmpty)
+    }
+
+    func testDeliveryScopeCoversPreviewDirectionallyAndRejectsUnknownExplicitScopes() {
+        let preview = official(post("1001", scheduled: nil, published: "2026-09-22T10:00:00Z"))
+        let delivered = official(post("2001", scheduled: nil, status: "completed",
+                                      published: "2026-09-22T20:00:00Z", delivery: "2026-09-22T20:00:00Z"))
+        for (previewScope, deliveryScope, shouldArchive) in [
+            ("broad", "chatgpt", false), ("all", "chatgpt", false),
+            ("global", "codex", false), ("unspecified", "chatgpt", false),
+            ("codex", "chatgpt", false), ("chatgpt", "codex", false),
+            ("codex", "all", true), ("chatgpt", "broad", true),
+            ("codex", "codex", true), ("chatgpt", "chatgpt", true),
+            ("all", "unrecognized-segment", false), ("unrecognized-segment", "all", false),
+            ("unrecognized-segment", "unrecognized-segment", false)
+        ] {
+            var scopedPreview = preview
+            scopedPreview.scope = previewScope
+            var scopedDelivery = delivered
+            scopedDelivery.scope = deliveryScope
+            let result = state(pending: [scopedPreview], records: [scopedDelivery], at: "2026-09-22T21:00:00Z")
+            XCTAssertEqual(result.archivedUndated[preview.id] != nil, shouldArchive,
+                           "Preview \(previewScope), delivery \(deliveryScope)")
+            XCTAssertEqual(result.undatedAnnouncements.isEmpty, shouldArchive)
+        }
+    }
+
+    func testUndatedProjectionSurvivesReloadWithoutChangingLedgerOrNotifyingOnEmptyPolls() throws {
+        let preview = official(post("1001", scheduled: nil, status: "watch", published: "2026-09-22T10:00:00Z"))
+        let delivered = official(post("2001", scheduled: nil, status: "rolling_out",
+                                      published: "2026-09-22T20:00:00Z", delivery: "2026-09-22T20:00:00Z"))
+        func snapshot(_ rows: [ResetAnnouncement]) -> NextResetSnapshot {
+            NextResetSnapshot(announcements: rows, sourceCheckedAt: nil, sourceIsFresh: true)
+        }
+        var ledger = ResetLedger()
+        _ = ledger.ingest(snapshot([preview]), at: date("2026-09-22T10:01:00Z"), occurredWhileAway: false)
+        _ = ledger.ingest(snapshot([delivered]), at: date("2026-09-22T20:01:00Z"), occurredWhileAway: false)
+        let originalLedger = ledger
+        let before = ResetTopPresentation.make(pending: ledger.pendingAnnouncements, records: ledger.records, now: date("2026-09-22T21:00:00Z"))
+        XCTAssertEqual(before.archivedUndated[preview.id], delivered)
+        XCTAssertEqual(ledger, originalLedger)
+        ledger = try JSONDecoder().decode(ResetLedger.self, from: JSONEncoder().encode(ledger))
+        XCTAssertTrue(ledger.ingest(snapshot([]), at: date("2026-09-22T21:00:01Z"), occurredWhileAway: true).isEmpty)
+        XCTAssertTrue(ledger.ingest(snapshot([preview, delivered]), at: date("2026-09-22T21:00:02Z"), occurredWhileAway: true).isEmpty)
+        let after = ResetTopPresentation.make(pending: ledger.pendingAnnouncements, records: ledger.records, now: date("2026-09-22T21:00:00Z"))
+        XCTAssertEqual(after, before)
+        XCTAssertEqual(ledger.records, originalLedger.records)
+        XCTAssertEqual(ledger.versions, originalLedger.versions)
+        XCTAssertEqual(ledger.pendingAnnouncements, [preview])
+        XCTAssertNil(ledger.records.first(where: { $0.id == delivered.id })?.announcement.relatedAnnouncementIDs)
+    }
+
+    private func official(_ post: ResetAnnouncement) -> ResetAnnouncement {
+        var result = post
+        result.sourceURL = URL(string: "https://x.com/thsottiaux/status/\(post.id)")
+        return result
     }
 
     func testCompletingOneNoticeDoesNotHideAnother() {

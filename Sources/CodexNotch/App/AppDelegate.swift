@@ -93,6 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeCoordinator?.onOpenResetAnnouncements = { [weak experience] in
             experience?.showAnnouncements()
         }
+        runtimeCoordinator?.onOpenUndatedAnnouncements = { [weak experience] in
+            experience?.showUndatedAnnouncements()
+        }
         experience.onShowSummary = { [weak self] in
             self?.runtimeCoordinator?.showResetSummary()
         }

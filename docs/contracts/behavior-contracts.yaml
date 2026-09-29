@@ -1993,7 +1993,7 @@ contracts:
 
   - id: RESET-ANNOUNCEMENTS-005
     title: Show two estimated Los Angeles countdown phases and live clock
-    status: active
+    status: superseded
     statement: >-
       Preserve RESET-ANNOUNCEMENTS-004. For a weekday-only post such as Tuesday,
       use the original post time to count down in seconds to Los Angeles Tuesday
@@ -2037,6 +2037,52 @@ contracts:
       - Sources/CodexNotch/Announcements/ResetSelfCheck.swift
       - "manual: verify both date-only countdown phases, no countdown after the second cutoff, live Los Angeles weekday and HH:mm:ss throughout, two pending cards, weekly quota and reset credits"
     supersedes: [RESET-ANNOUNCEMENTS-004]
+    superseded_by: RESET-ANNOUNCEMENTS-006
+    last_verified_commit: null
+
+  - id: RESET-ANNOUNCEMENTS-006
+    title: Summarize undated previews while keeping dated countdowns and delivery age distinct
+    status: active
+    statement: >-
+      Preserve the dated-preview phases, exact deadlines, live Los Angeles clock,
+      estimate labels, notification snapshots, interface-check result, unread state,
+      source evidence and privacy boundaries of RESET-ANNOUNCEMENTS-005. Every
+      visible dated pending preview retains its own countdown. Pending previews
+      without a usable date have no invented deadline and share one compact home
+      summary, showing the newest available original-post excerpt and its actual
+      publication time with a history entry point. Relative words in quoted source
+      text are explicitly labelled as the original post's context, not a new
+      countdown from the current check. Do not fabricate an excerpt or time if the
+      source does not provide one. A later credible official general delivery that
+      follows an older undated preview and has compatible scope and reset type may
+      remove that older preview from the home summary only. Keep the ledger record
+      unresolved, retain the original post in history, and label it
+      “后续已有重置 · 本条关联未确认”; this is neither proof of completion nor an
+      announcement-to-delivery match. An independent newer undated preview still
+      appears in the summary. If the older preview later gains a usable date, it
+      reappears as its own countdown. Only explicit or uniquely supported dated
+      association can close a preview in the ledger. Show the elapsed time since
+      the most recent known general official delivery as a separate live signal,
+      including when other previews are visible; never derive it from an estimated
+      deadline, a local check, weekly quota or reset-credit changes. Keep weekly
+      quota, weekly reset and reset-credit expiry accessible below the bounded
+      announcement area. A successful no-new check does not hide existing previews;
+      a failed check never claims that no new preview exists.
+    rationale: Undated previews need a useful visible reminder without crowding out quota details, while later general delivery must not falsely certify that a specific older post was fulfilled.
+    source: user-request
+    owner: local-customization
+    risk: medium
+    scope:
+      include: [public-announcements, undated-preview-summary, multiple-countdowns, delivery-elapsed-time, historical-uncertainty, notch-entry]
+      exclude: [source-fetching, notification-policy, read-state, ledger-completion, account-authentication, weekly-quota-semantics, redeeming-credits]
+    examples:
+      positive: Two undated previews form one summary with the latest original-post excerpt and publication time; a dated preview has its own countdown; a later compatible official delivery hides only an older undated preview from home, leaves an unresolved labelled history row and a newer preview visible; a later date correction restores the older countdown; recent delivery age remains visible beside active previews.
+      negative: Inventing a deadline for an undated post, interpreting “tomorrow” from check time, silently marking an older post completed or linked, hiding a newer preview, using credit-count change as delivery, or pushing weekly quota and credits out of the bounded card.
+    guards:
+      - Tests/CodexNotchTests/ResetTopPresentationTests.swift
+      - Sources/CodexNotch/Announcements/ResetTopCycleSelfCheck.swift
+      - "manual: inspect dated and undated previews together, latest original-post excerpt and time, uncertain history label, independent delivery age, weekly quota and reset credits on the installed app"
+    supersedes: [RESET-ANNOUNCEMENTS-005]
     superseded_by: null
     last_verified_commit: null
 
