@@ -202,8 +202,8 @@ struct ResetAnnouncementEntryView: View {
 
     static func emptyHeadline(didResetToday: Bool, origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
         if origin == .accountReceipt {
-            return language.localized(chinese: "暂无最新重置预告（本账户已收到重置券）",
-                                      english: "No new reset announcements (reset credit received)")
+            return language.localized(chinese: "暂无最新重置预告",
+                                      english: "No new reset announcements")
         }
         if didResetToday {
             return language.localized(chinese: "暂无最新重置预告（今天已重置）",

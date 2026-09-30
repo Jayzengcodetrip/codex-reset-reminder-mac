@@ -21,7 +21,7 @@ final class ResetAccountReceiptUITests: XCTestCase {
         XCTAssertEqual(ResetAnnouncementEntriesView.height(for: presentation), withDelivery)
         XCTAssertEqual(ResetAnnouncementEntryView.emptyHeadline(
             didResetToday: true, origin: .accountReceipt, language: .chinese),
-            "暂无最新重置预告（本账户已收到重置券）")
+            "暂无最新重置预告")
         XCTAssertEqual(ResetAnnouncementEntriesView.deliveryAgeHeading(
             origin: .accountReceipt, language: .chinese), "距本账户收到重置券已过 ")
         XCTAssertEqual(ResetAnnouncementEntriesView.deliveryFootnote(
