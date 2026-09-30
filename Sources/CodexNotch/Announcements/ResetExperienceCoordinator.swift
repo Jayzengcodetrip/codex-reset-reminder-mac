@@ -176,6 +176,12 @@ final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelega
         showAnnouncements()
     }
 
+    /// Account receipt is a local presentation signal, never a public announcement
+    /// or a reason to acknowledge, notify, or complete any ledger record.
+    func updateAccountReceipt(_ receipt: AccountResetReceipt?) {
+        announcementNavigation.updateAccountReceipt(receipt)
+    }
+
     private func publishStatus() {
         let pending = monitor.pendingAnnouncements
         let status = ResetCheckPresentation.compactText(

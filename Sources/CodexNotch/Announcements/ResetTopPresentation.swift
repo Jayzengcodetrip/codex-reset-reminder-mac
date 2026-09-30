@@ -8,10 +8,16 @@ struct ResetTopPresentation: Equatable {
     var secondsSinceLastDelivery: Int? = nil
     var undatedAnnouncements: [ResetAnnouncement] = []
     var archivedUndated: [String: ResetAnnouncement] = [:]
+    var archivedForAccountReceipt: [String: AccountResetReceipt] = [:]
+    var latestDeliveryOrigin: ResetDeliveryOrigin? = nil
 
-    static func make(pending: [ResetAnnouncement], records: [ResetRecord], now: Date) -> Self {
+    static func make(pending: [ResetAnnouncement], records: [ResetRecord], now: Date,
+                     accountReceipt: AccountResetReceipt? = nil) -> Self {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = ResetScheduleTiming.losAngeles
+        let receipt = accountReceipt.flatMap {
+            $0.grantedAt <= now && ResetDeliveryEvidence.isGeneralAccountReceipt($0) ? $0 : nil
+        }
         let active = pending.filter { announcement in
             let status = normalizedStatus(announcement)
             return !deliveryStatuses.contains(status) && !["cancelled", "canceled"].contains(status)
@@ -36,6 +42,7 @@ struct ResetTopPresentation: Equatable {
         }
         var undated: [ResetAnnouncement] = []
         var archived: [String: ResetAnnouncement] = [:]
+        var archivedForAccount: [String: AccountResetReceipt] = [:]
         for announcement in active.filter({ ResetScheduleTiming.target(for: $0) == nil }).sorted(by: {
             let lhs = $0.announcedAt ?? .distantPast, rhs = $1.announcedAt ?? .distantPast
             return lhs == rhs ? $0.id < $1.id : lhs < rhs
@@ -44,11 +51,14 @@ struct ResetTopPresentation: Equatable {
                 ResetDeliveryEvidence.canArchiveUndated(announcement, after: $0, now: now)
             }) {
                 archived[announcement.id] = delivery
+            } else if let receipt,
+                      ResetDeliveryEvidence.canArchiveUndated(announcement, for: receipt, now: now) {
+                archivedForAccount[announcement.id] = receipt
             } else {
                 undated.append(announcement)
             }
         }
-        let latestDelivery = records.compactMap { record -> Date? in
+        let latestPublicDelivery = records.compactMap { record -> Date? in
             let announcement = record.announcement
             guard ResetDeliveryEvidence.isGeneralDelivery(announcement) else { return nil }
             // A completion post can use its publication time. A preannouncement
@@ -58,19 +68,34 @@ struct ResetTopPresentation: Equatable {
             guard let delivery, delivery <= now else { return nil }
             return delivery
         }.max()
+        // The same instant prefers the stronger personal receipt; a later
+        // public delivery still moves the clock forward and identifies its origin.
+        let useAccountReceipt = receipt.map { $0.grantedAt >= (latestPublicDelivery ?? .distantPast) } ?? false
+        let latestDelivery = useAccountReceipt ? receipt?.grantedAt : latestPublicDelivery
+        let origin: ResetDeliveryOrigin? = latestDelivery == nil ? nil
+            : useAccountReceipt ? .accountReceipt : .publicAnnouncement
         return Self(announcements: visible,
                     didResetToday: latestDelivery.map { calendar.isDate($0, inSameDayAs: now) } ?? false,
                     secondsSinceLastDelivery: latestDelivery.map { max(0, Int(now.timeIntervalSince($0))) },
-                    undatedAnnouncements: undated, archivedUndated: archived)
+                    undatedAnnouncements: undated, archivedUndated: archived,
+                    archivedForAccountReceipt: archivedForAccount, latestDeliveryOrigin: origin)
     }
 
     func emptyText(language: AppLanguage) -> String {
         if didResetToday {
+            if latestDeliveryOrigin == .accountReceipt {
+                return language.localized(chinese: "暂无最新重置预告（今天已收到重置券）",
+                                          english: "No new reset announcements (reset credit received today)")
+            }
             return language.localized(chinese: "暂无最新重置预告（今天已重置）",
                                       english: "No new reset announcements (reset delivered today)")
         }
         if let elapsed = secondsSinceLastDelivery {
             let time = Self.elapsedText(seconds: elapsed, language: language)
+            if latestDeliveryOrigin == .accountReceipt {
+                return language.localized(chinese: "暂无最新重置预告（距离上次收到重置券已过\(time)）",
+                                          english: "No new reset announcements (last reset credit received \(time) ago)")
+            }
             return language.localized(chinese: "暂无最新重置预告（距离上次重置已过\(time)）",
                                       english: "No new reset announcements (last reset \(time) ago)")
         }

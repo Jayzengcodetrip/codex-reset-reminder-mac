@@ -56,6 +56,8 @@ final class NotchRuntimeCoordinator {
     private var lastTitleRefreshAt: Date?
     private var titleRefreshInFlight = false
     private var usage: UsageSnapshot?
+    private let accountReceiptCache = AccountResetReceiptCache()
+    private var receiptAccountID: String?
     private var lastUsageRequestAt: Date?
     private var usageRequestID: UUID?
     private var hoverExpandWorkItem: DispatchWorkItem?
@@ -66,6 +68,25 @@ final class NotchRuntimeCoordinator {
 
     var onOpenResetAnnouncements: (() -> Void)?
     var onOpenUndatedAnnouncements: (() -> Void)?
+    var onAccountResetReceiptChange: ((AccountResetReceipt?) -> Void)?
+
+    private func applyAccountResetReceipt(_ receipt: AccountResetReceipt?) {
+        guard viewModel.accountResetReceipt != receipt else { return }
+        viewModel.accountResetReceipt = receipt
+        onAccountResetReceiptChange?(receipt)
+        if started { render() }
+    }
+
+    private func applyReceiptAccountIdentity(_ accountID: String?) {
+        // Without a stable identity, retaining a prior account's quota is unsafe.
+        let changed = receiptAccountID != accountID || accountID == nil
+        if changed {
+            receiptAccountID = accountID
+            usage = nil
+        }
+        applyAccountResetReceipt(accountReceiptCache.receipt(for: accountID, now: nowProvider()))
+        if changed && started { render() }
+    }
 
     func updateResetAnnouncements(unread: Int, awayUnread: Int, status: String, announcements: [ResetAnnouncement] = [], records: [ResetRecord] = []) {
         let priorHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation)
@@ -365,21 +386,44 @@ final class NotchRuntimeCoordinator {
         usageTask = Task { [weak self] in
             do {
                 let credentials = try reader.read()
+                await MainActor.run { [weak self] in
+                    guard let self, self.usageRequestID == requestID else { return }
+                    self.applyReceiptAccountIdentity(credentials.accountID)
+                }
                 let snapshot = try await CodexUsageClient(
                     credentials: credentials,
                     session: urlSession,
                     endpoint: endpoint
                 ).fetch()
                 guard !Task.isCancelled else { return }
+                // A response from the previous account must not be applied after sign-in changes.
+                let currentCredentials = try? reader.read()
+                guard let currentCredentials,
+                      currentCredentials.accountID == credentials.accountID,
+                      credentials.accountID != nil || currentCredentials.accessToken == credentials.accessToken else {
+                    await MainActor.run { [weak self] in
+                        guard let self, self.usageRequestID == requestID else { return }
+                        self.applyReceiptAccountIdentity(currentCredentials?.accountID)
+                        if currentCredentials != nil { self.refreshUsage() }
+                    }
+                    return
+                }
                 await MainActor.run { [weak self] in
                     guard let self, self.usageRequestID == requestID else { return }
                     self.usage = snapshot
+                    let receipt = (try? self.accountReceiptCache.update(
+                        accountID: credentials.accountID, credits: snapshot.resetCredits, now: self.nowProvider()))
+                        ?? self.accountReceiptCache.receipt(for: credentials.accountID, now: self.nowProvider())
+                    self.applyAccountResetReceipt(receipt)
                     self.render()
                 }
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
                     guard let self, self.usageRequestID == requestID else { return }
+                    // Preserve a saved receipt only for the currently signed-in account.
+                    let currentAccount = (try? reader.read())?.accountID
+                    self.applyReceiptAccountIdentity(currentAccount)
                     // Keep the last successful snapshot. A transient usage failure
                     // must not hide an otherwise valid session indicator.
                     self.render()

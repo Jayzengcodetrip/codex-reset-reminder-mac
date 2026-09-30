@@ -100,7 +100,11 @@ struct ResetCreditsDTO: Decodable {
                 ResetCredit(
                     id: credit.id ?? "reset-credit-\(index)-\(credit.expiresAt?.timeIntervalSince1970 ?? 0)",
                     title: credit.title,
-                    expiresAt: credit.expiresAt
+                    expiresAt: credit.expiresAt,
+                    grantedAt: credit.grantedAt,
+                    resetType: credit.resetType,
+                    creditDescription: credit.creditDescription,
+                    isSupportedByPlan: credit.isSupportedByPlan
                 )
             }
     }
@@ -111,12 +115,20 @@ struct ResetCreditDTO: Decodable {
     let title: String?
     let status: String?
     let expiresAt: Date?
+    let grantedAt: Date?
+    let resetType: String?
+    let creditDescription: String?
+    let isSupportedByPlan: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id
         case title
         case status
         case expiresAt = "expires_at"
+        case grantedAt = "granted_at"
+        case resetType = "reset_type"
+        case creditDescription = "description"
+        case isSupportedByPlan = "is_supported_by_plan"
     }
 
     init(from decoder: Decoder) throws {
@@ -125,6 +137,10 @@ struct ResetCreditDTO: Decodable {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         status = try container.decodeIfPresent(String.self, forKey: .status)
         expiresAt = FlexibleDate.decode(from: container, forKey: .expiresAt)
+        grantedAt = FlexibleDate.decode(from: container, forKey: .grantedAt)
+        resetType = try container.decodeIfPresent(String.self, forKey: .resetType)
+        creditDescription = try container.decodeIfPresent(String.self, forKey: .creditDescription)
+        isSupportedByPlan = try container.decodeIfPresent(Bool.self, forKey: .isSupportedByPlan)
     }
 }
 

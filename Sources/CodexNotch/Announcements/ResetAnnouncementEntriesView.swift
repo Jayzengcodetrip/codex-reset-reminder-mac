@@ -11,6 +11,7 @@ struct ResetAnnouncementEntriesView: View {
     let language: AppLanguage
     var didResetToday: Bool = false
     var secondsSinceLastDelivery: Int? = nil
+    var latestDeliveryOrigin: ResetDeliveryOrigin? = nil
     let action: () -> Void
     var undatedAction: () -> Void = {}
 
@@ -32,7 +33,9 @@ struct ResetAnnouncementEntriesView: View {
     }
 
     static func height(timedCount: Int, hasUndated: Bool, hasDelivery: Bool) -> CGFloat {
-        guard timedCount > 0 || hasUndated else { return ResetAnnouncementEntryView.emptyHeight }
+        guard timedCount > 0 || hasUndated else {
+            return ResetAnnouncementEntryView.emptyHeight + (hasDelivery ? deliveryHeight + 8 : 0)
+        }
         let count = timedCount + (hasUndated ? 1 : 0)
         let cards = CGFloat(timedCount) * ResetAnnouncementEntryView.announcementHeight
             + (hasUndated ? summaryHeight : 0) + CGFloat(max(0, count - 1)) * 8
@@ -44,7 +47,7 @@ struct ResetAnnouncementEntriesView: View {
         Self.height(timedCount: announcements.count, hasUndated: !undatedAnnouncements.isEmpty,
                     hasDelivery: secondsSinceLastDelivery != nil)
     }
-    private var footerHeight: CGFloat { hasActive && secondsSinceLastDelivery != nil ? Self.deliveryHeight + 8 : 0 }
+    private var footerHeight: CGFloat { secondsSinceLastDelivery != nil ? Self.deliveryHeight + 8 : 0 }
     private var contentHeight: CGFloat {
         guard hasActive else { return ResetAnnouncementEntryView.emptyHeight }
         let count = announcements.count + (undatedAnnouncements.isEmpty ? 0 : 1)
@@ -63,14 +66,14 @@ struct ResetAnnouncementEntriesView: View {
                 }
             }
             .frame(height: height - footerHeight)
-            if hasActive, let seconds = secondsSinceLastDelivery {
+            if let seconds = secondsSinceLastDelivery {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(language.localized(chinese: "距上次重置已过 ", english: "Since last reset: ")
+                    Text(Self.deliveryAgeHeading(origin: latestDeliveryOrigin, language: language)
                          + ResetTopPresentation.elapsedText(seconds: seconds, language: language))
                         .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(Color.mint)
-                    Text(language.localized(chinese: "按官方发放消息计时，不代表账户到账", english: "From the official rollout post; account receipt may vary"))
+                    Text(Self.deliveryFootnote(origin: latestDeliveryOrigin, language: language))
                         .font(.system(size: 9))
                         .foregroundStyle(Color.white.opacity(0.6))
                         .lineLimit(1)
@@ -84,13 +87,31 @@ struct ResetAnnouncementEntriesView: View {
         .frame(height: height)
     }
 
+    static func deliveryAgeHeading(origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
+        if origin == .accountReceipt {
+            return language.localized(chinese: "距本账户收到重置券已过 ",
+                                      english: "Since this account received a reset credit: ")
+        }
+        return language.localized(chinese: "距上次重置已过 ", english: "Since last reset: ")
+    }
+
+    static func deliveryFootnote(origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
+        if origin == .accountReceipt {
+            return language.localized(chinese: "按本账户重置券发放时间计时，需自行使用",
+                                      english: "From this account's credit grant; redeem it yourself")
+        }
+        return language.localized(chinese: "按官方发放消息计时，不代表账户到账",
+                                  english: "From the official rollout post; account receipt may vary")
+    }
+
     private var cards: some View {
         VStack(spacing: 8) {
             if !hasActive {
                 ResetAnnouncementEntryView(unreadCount: unreadCount, awayUnreadCount: awayUnreadCount,
                     statusText: statusText, announcement: nil,
                     now: now, language: language, didResetToday: didResetToday,
-                    secondsSinceLastDelivery: secondsSinceLastDelivery, action: action)
+                    secondsSinceLastDelivery: secondsSinceLastDelivery,
+                    latestDeliveryOrigin: latestDeliveryOrigin, action: action)
             } else {
                 ForEach(Array(announcements.reversed()), id: \.id) { announcement in
                     ResetAnnouncementEntryView(
@@ -98,7 +119,8 @@ struct ResetAnnouncementEntriesView: View {
                         awayUnreadCount: announcement.id == announcements.last?.id ? awayUnreadCount : 0,
                         statusText: statusText, announcement: announcement,
                         now: now, language: language, didResetToday: didResetToday,
-                        secondsSinceLastDelivery: secondsSinceLastDelivery, action: action)
+                        secondsSinceLastDelivery: secondsSinceLastDelivery,
+                        latestDeliveryOrigin: latestDeliveryOrigin, action: action)
                 }
                 if let latest = undatedAnnouncements.last {
                     undatedSummary(latest)
@@ -175,7 +197,20 @@ struct ResetAnnouncementEntryView: View {
     let language: AppLanguage
     var didResetToday: Bool = false
     var secondsSinceLastDelivery: Int? = nil
+    var latestDeliveryOrigin: ResetDeliveryOrigin? = nil
     let action: () -> Void
+
+    static func emptyHeadline(didResetToday: Bool, origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
+        if origin == .accountReceipt {
+            return language.localized(chinese: "暂无最新重置预告（本账户已收到重置券）",
+                                      english: "No new reset announcements (reset credit received)")
+        }
+        if didResetToday {
+            return language.localized(chinese: "暂无最新重置预告（今天已重置）",
+                                      english: "No new reset announcements (reset delivered today)")
+        }
+        return language.localized(chinese: "暂无最新重置预告", english: "No new reset announcements")
+    }
 
     private var title: String {
         if announcement != nil {
@@ -185,7 +220,7 @@ struct ResetAnnouncementEntryView: View {
             }
             return heading + (unreadCount > 0 ? language.localized(chinese: " · 有未读更新", english: " · Unread updates") : "")
         }
-        return ResetTopPresentation(announcements: [], didResetToday: didResetToday, secondsSinceLastDelivery: secondsSinceLastDelivery).emptyText(language: language)
+        return Self.emptyHeadline(didResetToday: didResetToday, origin: latestDeliveryOrigin, language: language)
     }
 
     private var highlighted: Bool { announcement != nil }
@@ -302,4 +337,3 @@ struct ResetAnnouncementEntryView: View {
         .accessibilityLabel(accessibilityText)
     }
 }
-

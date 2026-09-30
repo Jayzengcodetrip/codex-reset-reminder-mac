@@ -207,6 +207,94 @@ enum ResetTopCycleSelfCheck {
             try check(ResetTopPresentation.elapsedText(seconds: seconds, language: .chinese) == expected,
                       "Elapsed time must use zero-padded 24-hour durations and whole days")
         }
+
+        // Exact personal grant timestamps are independent of public completion
+        // evidence: they can update this account's view, never its public ledger.
+        let accountPreview = post("7001", scheduled: nil, title: "下周重置预告",
+                                  published: "2026-09-26T21:41:35Z")
+        let grantedAt = date("2026-09-29T18:46:26Z").addingTimeInterval(0.050805)
+        let receipt = AccountResetReceipt(grantedAt: grantedAt, title: "Full reset",
+                                           description: "A complimentary reset credit.")
+        let receiptNow = date("2026-09-30T00:50:00Z")
+        var accountLedger = ResetLedger()
+        _ = accountLedger.ingest(snapshot([accountPreview]), at: date("2026-09-27T00:00:00Z"), occurredWhileAway: false)
+        let beforeAccountProjection = accountLedger
+        let accountTop = ResetTopPresentation.make(pending: accountLedger.pendingAnnouncements,
+            records: accountLedger.records, now: receiptNow, accountReceipt: receipt)
+        try check(accountTop.latestDeliveryOrigin == .accountReceipt
+                  && accountTop.secondsSinceLastDelivery == 21_813,
+                  "Personal grant must advance the clock using its precise timestamp")
+        try check(accountTop.didResetToday
+                  && accountTop.emptyText(language: .chinese) == "暂无最新重置预告（今天已收到重置券）",
+                  "Personal receipt wording must not claim an automatic reset")
+        try check(accountTop.undatedAnnouncements.isEmpty
+                  && accountTop.archivedForAccountReceipt == [accountPreview.id: receipt]
+                  && accountTop.archivedUndated.isEmpty,
+                  "Personal archival must have a separate reason from public delivery")
+        try check(accountLedger == beforeAccountProjection
+                  && accountLedger.pendingAnnouncements == [accountPreview]
+                  && accountLedger.records.first?.announcement.relatedAnnouncementIDs == nil,
+                  "Personal receipt must leave public status, event links and ledger untouched")
+        let nextDayAccountTop = ResetTopPresentation.make(pending: [], records: [],
+            now: date("2026-09-30T07:00:00Z"), accountReceipt: receipt)
+        try check(!nextDayAccountTop.didResetToday
+                  && nextDayAccountTop.emptyText(language: .chinese)
+                    == "暂无最新重置预告（距离上次收到重置券已过12:13:33）",
+                  "Personal receipt switches to elapsed clock at LA midnight")
+        let reloadedReceipt = try JSONDecoder().decode(AccountResetReceipt.self, from: JSONEncoder().encode(receipt))
+        accountLedger = try JSONDecoder().decode(ResetLedger.self, from: JSONEncoder().encode(accountLedger))
+        try check(accountLedger.ingest(snapshot([]), at: date("2026-09-30T00:49:00Z"), occurredWhileAway: true).isEmpty,
+                  "Personal receipt projection cannot make an empty public poll notify")
+        try check(accountLedger.ingest(snapshot([accountPreview]), at: receiptNow, occurredWhileAway: true).isEmpty,
+                  "Personal receipt projection cannot make an unchanged public poll notify")
+        try check(ResetTopPresentation.make(pending: accountLedger.pendingAnnouncements, records: accountLedger.records,
+            now: receiptNow, accountReceipt: reloadedReceipt) == accountTop,
+            "Public ledger and personal receipt reload must preserve the projected state")
+
+        var laterPreview = accountPreview
+        laterPreview.announcedAt = grantedAt.addingTimeInterval(1)
+        var directPreview = accountPreview
+        directPreview.summary = "A one-time reset is coming."
+        var limitedPreview = accountPreview
+        limitedPreview.scope = "limited"
+        var missingDatePreview = accountPreview
+        missingDatePreview.announcedAt = nil
+        for preview in [laterPreview, directPreview, limitedPreview, missingDatePreview] {
+            try check(!ResetDeliveryEvidence.canArchiveUndated(preview, for: receipt, now: receiptNow),
+                      "Personal receipt must not hide later, direct-only, targeted or undated-publication previews")
+        }
+        var accountPreviewWithDate = accountPreview
+        accountPreviewWithDate.title = "周三重置预告"
+        accountPreviewWithDate.summary = "A reset on Wednesday."
+        accountPreviewWithDate.scheduledFor = date("2026-10-01T06:59:00Z")
+        _ = accountLedger.ingest(snapshot([accountPreviewWithDate]), at: receiptNow.addingTimeInterval(1), occurredWhileAway: false)
+        let datedAccountTop = ResetTopPresentation.make(pending: accountLedger.pendingAnnouncements,
+            records: accountLedger.records, now: receiptNow.addingTimeInterval(1), accountReceipt: receipt)
+        try check(datedAccountTop.announcements == [accountPreviewWithDate]
+                  && datedAccountTop.archivedForAccountReceipt.isEmpty,
+                  "Adding a date must restore the countdown independently of a personal receipt")
+        let futureReceipt = AccountResetReceipt(grantedAt: receiptNow.addingTimeInterval(1))
+        let futureAccountTop = ResetTopPresentation.make(pending: [accountPreview], records: [],
+            now: receiptNow, accountReceipt: futureReceipt)
+        try check(futureAccountTop.latestDeliveryOrigin == nil && futureAccountTop.secondsSinceLastDelivery == nil
+                  && futureAccountTop.undatedAnnouncements == [accountPreview],
+                  "A future personal grant timestamp cannot update the clock or hide a preview")
+        let compensationReceipt = AccountResetReceipt(grantedAt: grantedAt, title: "Compensation reset credit")
+        let compensationTop = ResetTopPresentation.make(pending: [accountPreview], records: [],
+            now: receiptNow, accountReceipt: compensationReceipt)
+        try check(!ResetDeliveryEvidence.isGeneralAccountReceipt(compensationReceipt)
+                  && compensationTop.latestDeliveryOrigin == nil
+                  && compensationTop.undatedAnnouncements == [accountPreview],
+                  "A targeted compensation receipt must not replace the general reset clock")
+        var laterPublicDelivery = broadDelivery
+        laterPublicDelivery.deliveryAt = date("2026-09-29T20:00:00Z")
+        laterPublicDelivery.announcedAt = laterPublicDelivery.deliveryAt
+        let publicFirstTop = ResetTopPresentation.make(pending: [], records: [ResetRecord(id: laterPublicDelivery.id,
+            announcement: laterPublicDelivery, isUnread: false, occurredWhileAway: false)],
+            now: receiptNow, accountReceipt: receipt)
+        try check(publicFirstTop.latestDeliveryOrigin == .publicAnnouncement
+                  && publicFirstTop.secondsSinceLastDelivery == 17_400,
+                  "A newer public delivery must take clock precedence over the personal receipt")
         return checks
     }
 

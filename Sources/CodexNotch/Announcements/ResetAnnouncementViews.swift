@@ -10,6 +10,11 @@ enum ResetAnnouncementFilter: String, CaseIterable {
 final class ResetAnnouncementsNavigation: ObservableObject {
     @Published var filter = ResetAnnouncementFilter.all
     @Published private(set) var selectedID: String?
+    @Published private(set) var accountReceipt: AccountResetReceipt?
+
+    func updateAccountReceipt(_ receipt: AccountResetReceipt?) {
+        accountReceipt = receipt
+    }
 
     func showUndatedAnnouncements() {
         filter = .undated
@@ -56,7 +61,8 @@ struct ResetAnnouncementsView: View {
     }
 
     private var presentation: ResetTopPresentation {
-        ResetTopPresentation.make(pending: monitor.pendingAnnouncements, records: monitor.records, now: .now)
+        ResetTopPresentation.make(pending: monitor.pendingAnnouncements, records: monitor.records,
+                                  now: .now, accountReceipt: navigation.accountReceipt)
     }
 
     private var visibleRecords: [ResetRecord] {
@@ -92,6 +98,7 @@ struct ResetAnnouncementsView: View {
                         ResetAnnouncementDetailView(
                             announcement: record.announcement, language: language,
                             laterDelivery: presentation.archivedUndated[record.id],
+                            laterAccountReceipt: presentation.archivedForAccountReceipt[record.id],
                             onOpenDelivery: { delivery in
                                 navigation.showDelivery(id: delivery.id, markRead: monitor.markRead)
                             }
@@ -242,6 +249,18 @@ struct ResetAnnouncementsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 12)
+            } else if let receipt = presentation.archivedForAccountReceipt[record.id] {
+                Text(label("本账户已收到重置券 · 本条关联未确认", "Reset credit received in this account · Link unconfirmed"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 12)
+                Text(label("到账：", "Granted: ") + ResetAnnouncementDisplay.beijingTimestamp(receipt.grantedAt)
+                     + label(" 北京时间", " Beijing"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 12)
+                    .monospacedDigit()
             }
             Text(record.announcement.announcedAt.map(ResetAnnouncementDisplay.beijingDate)
                  ?? label("发布时间未提供", "Publication time unavailable"))
@@ -300,6 +319,7 @@ private struct ResetAnnouncementDetailView: View {
     let announcement: ResetAnnouncement
     let language: AppLanguage
     let laterDelivery: ResetAnnouncement?
+    let laterAccountReceipt: AccountResetReceipt?
     let onOpenDelivery: (ResetAnnouncement) -> Void
 
     private func label(_ chinese: String, _ english: String) -> String {
@@ -333,6 +353,23 @@ private struct ResetAnnouncementDetailView: View {
                             }
                             .buttonStyle(.link)
                             .font(.system(size: 12, weight: .medium))
+                        } else if let receipt = laterAccountReceipt {
+                            Text(label("本账户已收到重置券 · 本条关联未确认",
+                                       "Reset credit received in this account · Link unconfirmed"))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(label("到账时间：", "Credit granted: ")
+                                 + ResetAnnouncementDisplay.beijingTimestamp(receipt.grantedAt)
+                                 + label(" 北京时间", " Beijing"))
+                                .font(.system(size: 11))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                            Text(label("这张券需要你自行使用。较早预告只从首页收起，未证实与本次到账有关，也未标记为完成。",
+                                       "You must redeem this credit yourself. The older preview left the home summary, but its relation to this grant is unconfirmed and the preview remains unresolved."))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         } else {
                             Text(ResetAnnouncementDisplay.timingText(announcement, now: context.date, language: language))
                                 .font(.system(size: 14, weight: .semibold))
@@ -431,6 +468,18 @@ enum ResetAnnouncementDisplay {
 
     static func beijingDate(_ date: Date) -> String {
         beijingFormatter.string(from: date)
+    }
+
+    private static let beijingTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    static func beijingTimestamp(_ date: Date) -> String {
+        beijingTimestampFormatter.string(from: date)
     }
 
     static func isCompleted(_ announcement: ResetAnnouncement) -> Bool {

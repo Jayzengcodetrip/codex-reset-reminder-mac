@@ -53,6 +53,38 @@ enum ResetDeliveryEvidence {
         announcement.deliveryAt ?? (announcement.scheduledFor == nil ? announcement.announcedAt : nil)
     }
 
+    /// Account-specific compensation cannot replace the cached general reset
+    /// receipt or make a broad public preview appear fulfilled for this user.
+    static func isGeneralAccountReceipt(_ receipt: AccountResetReceipt) -> Bool {
+        !isSeparateBenefit((receipt.title ?? "") + " " + (receipt.description ?? ""))
+    }
+
+    /// A personal banked receipt can retire a compatible old undated notice
+    /// from this user's home view without claiming a matching global event.
+    static func canArchiveUndated(_ announcement: ResetAnnouncement,
+                                  for receipt: AccountResetReceipt, now: Date) -> Bool {
+        let eligibleScopes: Set<String> = ["", "unspecified", "broad", "all", "global", "general", "codex"]
+        guard announcement.scheduledFor == nil,
+              !terminalStatuses.contains(normalized(announcement.status)),
+              eligibleScopes.contains(normalized(announcement.scope)),
+              officialPost(announcement.sourceURL) != nil,
+              !isSeparateBenefit(announcement.title + " " + announcement.summary),
+              !explicitlyMentionsDirectReset(announcement.title + " " + announcement.summary),
+              isGeneralAccountReceipt(receipt),
+              let announcedAt = announcement.announcedAt,
+              receipt.grantedAt > announcedAt, receipt.grantedAt <= now else { return false }
+        let requestedKind = promisedKind(announcement.title + " " + announcement.summary)
+            ?? explicitPreviewKind(announcement.kind)
+        return requestedKind == nil || requestedKind == "banked"
+    }
+
+    private static func explicitlyMentionsDirectReset(_ text: String) -> Bool {
+        // Even a combined promise of banked and direct resets cannot be retired
+        // solely because the account received its banked part.
+        text.range(of: #"\bone[- ]time\s+reset\b|\b(?:direct|hard|automatic|global)\s+reset\b|直接重置"#,
+                   options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
     private static func deliveryScopeCoversPreview(_ deliveryScope: String, previewScope: String) -> Bool {
         let broadScopes: Set<String> = ["", "unspecified", "broad", "all", "global", "general"]
         let knownProductScopes: Set<String> = ["codex", "chatgpt"]

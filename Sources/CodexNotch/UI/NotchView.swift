@@ -16,8 +16,10 @@ final class NotchViewModel: ObservableObject {
     @Published var resetStatusText = "正在检查重置公告…"
     @Published var resetPreannouncements: [ResetAnnouncement] = []
     @Published var resetRecords: [ResetRecord] = []
+    @Published var accountResetReceipt: AccountResetReceipt?
     var resetTopPresentation: ResetTopPresentation {
-        ResetTopPresentation.make(pending: resetPreannouncements, records: resetRecords, now: now)
+        ResetTopPresentation.make(pending: resetPreannouncements, records: resetRecords, now: now,
+                                  accountReceipt: accountResetReceipt)
     }
 
     var onOpenResetAnnouncements: () -> Void = {}
@@ -332,6 +334,7 @@ struct NotchView: View {
                     resetUndatedAnnouncements: model.resetTopPresentation.undatedAnnouncements,
                     resetToday: model.resetTopPresentation.didResetToday,
                     resetElapsedSeconds: model.resetTopPresentation.secondsSinceLastDelivery,
+                    resetDeliveryOrigin: model.resetTopPresentation.latestDeliveryOrigin,
                     onOpenResetAnnouncements: model.onOpenResetAnnouncements,
                     onOpenUndatedAnnouncements: model.onOpenUndatedAnnouncements,
                     onActivateChatGPT: model.onActivateChatGPT,
@@ -1385,6 +1388,7 @@ private struct ExpandedNotchView: View {
     let resetUndatedAnnouncements: [ResetAnnouncement]
     let resetToday: Bool
     let resetElapsedSeconds: Int?
+    let resetDeliveryOrigin: ResetDeliveryOrigin?
     let onOpenResetAnnouncements: () -> Void
     let onOpenUndatedAnnouncements: () -> Void
     let onActivateChatGPT: () -> Void
@@ -1430,6 +1434,7 @@ private struct ExpandedNotchView: View {
                 language: language,
                 didResetToday: resetToday,
                 secondsSinceLastDelivery: resetElapsedSeconds,
+                latestDeliveryOrigin: resetDeliveryOrigin,
                 action: onOpenResetAnnouncements,
                 undatedAction: onOpenUndatedAnnouncements
             )

@@ -269,6 +269,162 @@ final class ResetTopPresentationTests: XCTestCase {
         return result
     }
 
+    func testAccountReceiptAdvancesClockAndArchivesOlderUndatedWithoutGlobalCompletion() {
+        let preview = official(post("1001", scheduled: nil, status: "watch", published: "2026-09-26T21:41:35Z"))
+        let previousPublic = official(post("2001", scheduled: nil, status: "rolling_out",
+                                           published: "2026-09-26T18:17:54Z", delivery: "2026-09-26T18:17:54Z"))
+        let receipt = AccountResetReceipt(grantedAt: date("2026-09-29T18:46:26Z").addingTimeInterval(0.050805),
+                                          title: "Full reset", description: "A complimentary reset credit.")
+        let now = date("2026-09-30T00:50:00Z")
+        let result = ResetTopPresentation.make(pending: [preview], records: [preview, previousPublic].map(record),
+                                               now: now, accountReceipt: receipt)
+        XCTAssertEqual(result.latestDeliveryOrigin, .accountReceipt)
+        XCTAssertEqual(result.secondsSinceLastDelivery, Int(now.timeIntervalSince(receipt.grantedAt)))
+        XCTAssertTrue(result.didResetToday)
+        XCTAssertEqual(result.emptyText(language: .chinese), "暂无最新重置预告（今天已收到重置券）")
+        XCTAssertTrue(result.undatedAnnouncements.isEmpty)
+        XCTAssertTrue(result.archivedUndated.isEmpty)
+        XCTAssertEqual(result.archivedForAccountReceipt, [preview.id: receipt])
+        XCTAssertNil(preview.relatedAnnouncementIDs)
+        XCTAssertEqual(preview.status, "watch")
+        let tomorrow = ResetTopPresentation.make(pending: [preview], records: [previousPublic].map(record),
+                                                 now: date("2026-09-30T07:00:00Z"), accountReceipt: receipt)
+        XCTAssertFalse(tomorrow.didResetToday)
+        XCTAssertEqual(tomorrow.emptyText(language: .chinese), "暂无最新重置预告（距离上次收到重置券已过12:13:33）")
+    }
+
+    func testAccountReceiptKeepsDatedNewerAndExplicitlyIncompatiblePreviews() {
+        let receipt = AccountResetReceipt(grantedAt: date("2026-09-29T18:46:26Z"))
+        let now = date("2026-09-30T00:50:00Z")
+        let original = official(post("1001", scheduled: nil, status: "watch", published: "2026-09-26T21:41:35Z"))
+        var incompatible: [ResetAnnouncement] = []
+        var direct = original
+        direct.summary = "A one-time reset is coming."
+        incompatible.append(direct)
+        var combined = original
+        combined.summary = "A one-time reset and a banked reset are coming."
+        incompatible.append(combined)
+        var explicitDirect = original
+        explicitDirect.summary = "A direct reset is coming."
+        incompatible.append(explicitDirect)
+        var directType = original
+        directType.kind = "automatic_global"
+        incompatible.append(directType)
+        var targeted = original
+        targeted.scope = "limited"
+        incompatible.append(targeted)
+        var compensation = original
+        compensation.summary = "A reset to compensate affected users."
+        incompatible.append(compensation)
+        var newer = original
+        newer.announcedAt = receipt.grantedAt.addingTimeInterval(1)
+        incompatible.append(newer)
+        var sameInstant = original
+        sameInstant.announcedAt = receipt.grantedAt
+        incompatible.append(sameInstant)
+        var missingPublication = original
+        missingPublication.announcedAt = nil
+        incompatible.append(missingPublication)
+        var otherProduct = original
+        otherProduct.scope = "chatgpt"
+        incompatible.append(otherProduct)
+        var unknownScope = original
+        unknownScope.scope = "unknown-segment"
+        incompatible.append(unknownScope)
+        var untrustedPreview = original
+        untrustedPreview.sourceURL = URL(string: "https://example.com/thsottiaux/status/1001")
+        incompatible.append(untrustedPreview)
+        for preview in incompatible {
+            let result = ResetTopPresentation.make(pending: [preview], records: [], now: now, accountReceipt: receipt)
+            XCTAssertEqual(result.undatedAnnouncements, [preview])
+            XCTAssertTrue(result.archivedForAccountReceipt.isEmpty)
+        }
+        var dated = original
+        dated.title = "周三重置预告"
+        dated.summary = "A reset on Wednesday."
+        dated.scheduledFor = date("2026-10-01T06:59:00Z")
+        let result = ResetTopPresentation.make(pending: [dated], records: [], now: now, accountReceipt: receipt)
+        XCTAssertEqual(result.announcements, [dated])
+        XCTAssertTrue(result.archivedForAccountReceipt.isEmpty)
+    }
+
+    func testCompensationReceiptCannotAdvanceGeneralClockOrArchiveGenericPreview() {
+        let preview = official(post("1001", scheduled: nil, status: "watch", published: "2026-09-26T21:41:35Z"))
+        let receipt = AccountResetReceipt(grantedAt: date("2026-09-29T18:46:26Z"),
+                                          title: "Compensation credit", description: "Credit for affected users.")
+        let result = ResetTopPresentation.make(pending: [preview], records: [], now: date("2026-09-30T00:50:00Z"), accountReceipt: receipt)
+        XCTAssertFalse(ResetDeliveryEvidence.isGeneralAccountReceipt(receipt))
+        XCTAssertNil(result.latestDeliveryOrigin)
+        XCTAssertNil(result.secondsSinceLastDelivery)
+        XCTAssertFalse(result.didResetToday)
+        XCTAssertEqual(result.undatedAnnouncements, [preview])
+        XCTAssertTrue(result.archivedForAccountReceipt.isEmpty)
+    }
+
+    func testLatestTimeChoosesNewerPublicOrPersonalEvidenceAndRejectsFutureReceipt() {
+        let receipt = AccountResetReceipt(grantedAt: date("2026-09-29T18:46:26Z"))
+        var publicDelivery = official(post("2001", scheduled: nil, status: "completed",
+                                           published: "2026-09-29T20:00:00Z", delivery: "2026-09-29T20:00:00Z"))
+        let now = date("2026-09-30T00:00:00Z")
+        let laterPublic = ResetTopPresentation.make(pending: [], records: [record(publicDelivery)], now: now, accountReceipt: receipt)
+        XCTAssertEqual(laterPublic.latestDeliveryOrigin, .publicAnnouncement)
+        XCTAssertEqual(laterPublic.secondsSinceLastDelivery, 14_400)
+        XCTAssertEqual(laterPublic.emptyText(language: .chinese), "暂无最新重置预告（今天已重置）")
+        publicDelivery.deliveryAt = receipt.grantedAt
+        let sameInstant = ResetTopPresentation.make(pending: [], records: [record(publicDelivery)], now: now, accountReceipt: receipt)
+        XCTAssertEqual(sameInstant.latestDeliveryOrigin, .accountReceipt)
+        let future = AccountResetReceipt(grantedAt: now.addingTimeInterval(1))
+        let withoutTrustedReceipt = ResetTopPresentation.make(pending: [], records: [], now: now, accountReceipt: future)
+        XCTAssertNil(withoutTrustedReceipt.latestDeliveryOrigin)
+        XCTAssertNil(withoutTrustedReceipt.secondsSinceLastDelivery)
+        XCTAssertFalse(withoutTrustedReceipt.didResetToday)
+    }
+
+    func testAccountReceiptKeepsExistingPublicArchivalReasonSeparate() {
+        let preview = official(post("1001", scheduled: nil, published: "2026-09-22T10:00:00Z"))
+        let delivered = official(post("2001", scheduled: nil, status: "completed",
+                                      published: "2026-09-22T20:00:00Z", delivery: "2026-09-22T20:00:00Z"))
+        let receipt = AccountResetReceipt(grantedAt: date("2026-09-29T18:46:26Z"))
+        let result = ResetTopPresentation.make(pending: [preview], records: [record(delivered)],
+                                               now: date("2026-09-30T00:50:00Z"), accountReceipt: receipt)
+        XCTAssertEqual(result.archivedUndated[preview.id], delivered)
+        XCTAssertTrue(result.archivedForAccountReceipt.isEmpty)
+        XCTAssertEqual(result.latestDeliveryOrigin, .accountReceipt)
+    }
+
+    func testAccountReceiptProjectionReloadAndPollsLeaveAnnouncementLedgerUntouched() throws {
+        let preview = official(post("1001", scheduled: nil, status: "watch", published: "2026-09-26T21:41:35Z"))
+        let receipt = AccountResetReceipt(grantedAt: date("2026-09-29T18:46:26Z"), title: "Full reset", description: "A free credit.")
+        func snapshot(_ rows: [ResetAnnouncement]) -> NextResetSnapshot {
+            NextResetSnapshot(announcements: rows, sourceCheckedAt: nil, sourceIsFresh: true)
+        }
+        var ledger = ResetLedger()
+        _ = ledger.ingest(snapshot([preview]), at: date("2026-09-27T00:00:00Z"), occurredWhileAway: false)
+        let previous = ledger
+        let expected = ResetTopPresentation.make(pending: ledger.pendingAnnouncements, records: ledger.records,
+                                                 now: date("2026-09-30T00:50:00Z"), accountReceipt: receipt)
+        XCTAssertEqual(ledger, previous)
+        ledger = try JSONDecoder().decode(ResetLedger.self, from: JSONEncoder().encode(ledger))
+        let restoredReceipt = try JSONDecoder().decode(AccountResetReceipt.self, from: JSONEncoder().encode(receipt))
+        XCTAssertTrue(ledger.ingest(snapshot([]), at: date("2026-09-30T00:49:00Z"), occurredWhileAway: true).isEmpty)
+        XCTAssertTrue(ledger.ingest(snapshot([preview]), at: date("2026-09-30T00:50:00Z"), occurredWhileAway: true).isEmpty)
+        let restored = ResetTopPresentation.make(pending: ledger.pendingAnnouncements, records: ledger.records,
+                                                 now: date("2026-09-30T00:50:00Z"), accountReceipt: restoredReceipt)
+        XCTAssertEqual(restored, expected)
+        XCTAssertEqual(ledger.records, previous.records)
+        XCTAssertEqual(ledger.versions, previous.versions)
+        XCTAssertEqual(ledger.pendingAnnouncements, [preview])
+        var dated = preview
+        dated.title = "周三重置预告"
+        dated.summary = "A reset on Wednesday."
+        dated.scheduledFor = date("2026-10-01T06:59:00Z")
+        _ = ledger.ingest(snapshot([dated]), at: date("2026-09-30T00:51:00Z"), occurredWhileAway: false)
+        let updated = ResetTopPresentation.make(pending: ledger.pendingAnnouncements, records: ledger.records,
+                                                now: date("2026-09-30T00:51:00Z"), accountReceipt: restoredReceipt)
+        XCTAssertEqual(updated.announcements, [dated])
+        XCTAssertTrue(updated.archivedForAccountReceipt.isEmpty)
+    }
+
     func testCompletingOneNoticeDoesNotHideAnother() {
         let completed = post(status: "completed", delivery: "2026-09-22T20:00:00Z")
         let other = post("wednesday", scheduled: "2026-09-24T06:59:00Z", title: "周三重置预告")

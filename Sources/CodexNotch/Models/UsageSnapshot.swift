@@ -29,11 +29,21 @@ struct ResetCredit: Equatable, Identifiable, Sendable {
     let id: String
     let title: String?
     let expiresAt: Date?
+    let grantedAt: Date?
+    let resetType: String?
+    let creditDescription: String?
+    let isSupportedByPlan: Bool?
 
-    init(id: String, title: String? = nil, expiresAt: Date? = nil) {
+    init(id: String, title: String? = nil, expiresAt: Date? = nil,
+         grantedAt: Date? = nil, resetType: String? = nil,
+         creditDescription: String? = nil, isSupportedByPlan: Bool? = nil) {
         self.id = id
         self.title = title
         self.expiresAt = expiresAt
+        self.grantedAt = grantedAt
+        self.resetType = resetType
+        self.creditDescription = creditDescription
+        self.isSupportedByPlan = isSupportedByPlan
     }
 }
 

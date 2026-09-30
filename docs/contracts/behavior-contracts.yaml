@@ -2042,7 +2042,7 @@ contracts:
 
   - id: RESET-ANNOUNCEMENTS-006
     title: Summarize undated previews while keeping dated countdowns and delivery age distinct
-    status: active
+    status: superseded
     statement: >-
       Preserve the dated-preview phases, exact deadlines, live Los Angeles clock,
       estimate labels, notification snapshots, interface-check result, unread state,
@@ -2083,6 +2083,53 @@ contracts:
       - Sources/CodexNotch/Announcements/ResetTopCycleSelfCheck.swift
       - "manual: inspect dated and undated previews together, latest original-post excerpt and time, uncertain history label, independent delivery age, weekly quota and reset credits on the installed app"
     supersedes: [RESET-ANNOUNCEMENTS-005]
+    superseded_by: RESET-ANNOUNCEMENTS-007
+    last_verified_commit: null
+
+  - id: RESET-ANNOUNCEMENTS-007
+    title: Show exact account credit grants beside public preview evidence
+    status: active
+    statement: >-
+      Preserve RESET-ANNOUNCEMENTS-006's independent dated countdowns, compact
+      undated summary, original-post excerpt and publication time, source context,
+      check status, unread state, public delivery relations, and bounded access to
+      weekly quota and reset-credit expiry. A past exact granted_at returned by
+      this account's reset-credit API may establish only that this account received
+      a reset credit; a credit count change, weekly quota change, missing/future
+      timestamp, or local check time is not delivery evidence. Store supported
+      account grants locally under a hashed account key, without tokens or raw
+      account IDs, and never send them to a public announcement source. Show the
+      elapsed time since the later of the credible public general delivery and
+      this account's exact credit grant, with an origin-specific label and a
+      separate live HH:mm:ss or Nd HH:mm:ss timer. In the account-grant case,
+      explicitly say the credit requires manual redemption. Keep the elapsed
+      signal visible even on a same-day empty home card. A later compatible
+      account grant may remove an older undated public preview from the home
+      summary only; history must preserve the unresolved original post and
+      display “本账户已收到重置券 · 本条关联未确认” with the exact grant time,
+      without fabricating a public post link or marking a ledger relation or
+      completion. Newer undated previews remain, and a previously archived
+      preview that later gains a date returns as its own countdown. Public
+      started-delivery evidence keeps its own provenance and existing history
+      label; an account grant alone does not trigger an announcement notification,
+      acknowledge a record, or prove rollout to other accounts.
+    rationale: The public feed can lag after a specific account receives a reset credit; the user needs the elapsed time and a truthful account-scoped status without losing unresolved announcements or quota details.
+    source: user-request
+    owner: local-customization
+    risk: medium
+    scope:
+      include: [account-reset-credit-receipt, undated-preview-summary, multiple-countdowns, delivery-elapsed-time, historical-uncertainty, notch-entry, local-cache]
+      exclude: [public-source-fetching, notification-policy, read-state, ledger-completion, weekly-quota-semantics, redeeming-credits]
+    examples:
+      positive: A credit with a past precise grant time makes the empty card show the account receipt and elapsed time; an older compatible undated post moves to unresolved history with its grant time while a newer preview and dated countdown remain; public delivery later takes over only when its evidence time is newer.
+      negative: Treating a mere credit-count change as delivery, claiming a credit was redeemed, inventing a public post link, closing the preview ledger, hiding a newer preview or dated countdown, or losing the elapsed timer on the day of receipt.
+    guards:
+      - Tests/CodexNotchTests/ResetCreditGrantTests.swift
+      - Tests/CodexNotchTests/ResetTopPresentationTests.swift
+      - Tests/CodexNotchTests/ResetAccountReceiptUITests.swift
+      - Sources/CodexNotch/Announcements/ResetTopCycleSelfCheck.swift
+      - "manual: inspect account receipt and elapsed time on an empty card, unresolved account-grant history, newer and dated previews, weekly quota, reset credits, and expiry in the installed app"
+    supersedes: [RESET-ANNOUNCEMENTS-006]
     superseded_by: null
     last_verified_commit: null
 
