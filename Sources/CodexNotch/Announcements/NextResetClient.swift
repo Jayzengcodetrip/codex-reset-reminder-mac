@@ -18,9 +18,10 @@ struct NextResetClient {
     let session: URLSession
     let baseURL: URL
     let includeDeliverySources: Bool
+    let linkResolver: BoundedResetLinkResolver
 
     init(session: URLSession? = nil, baseURL: URL = URL(string: "https://nextreset.net")!,
-         includeDeliverySources: Bool = true) {
+         includeDeliverySources: Bool = true, linkResolver: BoundedResetLinkResolver = BoundedResetLinkResolver()) {
         if let session { self.session = session } else {
             let configuration = URLSessionConfiguration.ephemeral
             configuration.httpCookieStorage = nil
@@ -31,6 +32,7 @@ struct NextResetClient {
         }
         self.baseURL = baseURL
         self.includeDeliverySources = includeDeliverySources
+        self.linkResolver = linkResolver
     }
 
     func fetch() async throws -> NextResetSnapshot {
@@ -39,7 +41,11 @@ struct NextResetClient {
         async let events = optionalDeliveryData("https://nextreset.org/api/v1/events.json")
         async let history = optionalDeliveryData("https://codex-resets.com/api/v1/resets?limit=100")
         let primary = try await Self.decode(status: status, archive: archive)
-        let delivery = await ResetDeliveryEvidence.announcements(eventsData: events, historyData: history)
+        let historyData = await history
+        let resolvedLinks = includeDeliverySources
+            ? await linkResolver.resolve(ResetDeliveryEvidence.shortCompletionLinks(historyData: historyData)) : [:]
+        let delivery = await ResetDeliveryEvidence.announcements(eventsData: events, historyData: historyData,
+                                                               resolvedLinks: resolvedLinks)
         return NextResetSnapshot(
             announcements: ResetDeliveryEvidence.merge(base: primary.announcements, supplements: delivery),
             sourceCheckedAt: primary.sourceCheckedAt, sourceIsFresh: primary.sourceIsFresh

@@ -2167,3 +2167,40 @@ contracts:
     supersedes: [NOTCH-VISIBILITY-049]
     superseded_by: null
     last_verified_commit: null
+
+  - id: RESET-LINKED-COMPLETION-001
+    title: Resolve short official confirmations only through verified reset context
+    status: active
+    statement: >-
+      A strict short completion reply from the official reset announcer may establish
+      completion only when its single linked official post matches an earlier,
+      primary-verified scheduled reset context of a compatible type. Use the
+      completion post publication time, preserve an explicit announcement relation,
+      and disclose the linked-context evidence. Bare phrases, missing context,
+      nonofficial URLs, negations, speculation, conflicting reset types and targeted
+      compensation must not become general delivery. Resolve at most four HTTPS
+      t.co links through anonymous bounded HEAD requests without cookies or account
+      credentials; never follow redirects or request an arbitrary destination.
+      Failed optional resolution does not invalidate the primary snapshot or erase
+      persisted delivery evidence. A previously saved completion is not replayed
+      as new on repeated checks or restart.
+    rationale: A completion reply can refer to an official reset without repeating the word reset, causing a stale elapsed timer despite a fetched post.
+    source: user-reported-regression
+    owner: local-customization
+    risk: medium
+    scope:
+      include: [public-delivery-parsing, short-link-context, delivery-elapsed-time, auxiliary-source-failure]
+      exclude: [account-quota-inference, reset-credit-redemption, notification-policy, window-geometry]
+    examples:
+      positive: A short confirmation links to an earlier verified scheduled automatic reset, advances the clock to its publication time, and remains confirmed when link resolution later fails.
+      negative: Treating a bare completion phrase or a redirect to an unrelated host as a reset, forwarding credentials, or using a local fetch timestamp as delivery time.
+    guards:
+      - Tests/CodexNotchTests/ResetDeliveryEvidenceTests.swift
+      - Tests/CodexNotchTests/ResetLinkedCompletionTests.swift
+      - Tests/CodexNotchTests/ResetLinkedCompletionIntegrationTests.swift
+      - Tests/CodexNotchTests/BoundedResetLinkResolverTests.swift
+      - Tests/CodexNotchTests/NextResetClientTests.swift
+      - "manual: verify the current official completion advances the installed app timer while weekly quota and reset credits remain visible"
+    supersedes: []
+    superseded_by: null
+    last_verified_commit: null

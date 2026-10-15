@@ -2,10 +2,137 @@ import Foundation
 
 /// Optional public evidence. A missing/malformed auxiliary feed cannot invalidate the main feed.
 enum ResetDeliveryEvidence {
-    static func announcements(eventsData: Data?, historyData: Data?) -> [ResetAnnouncement] {
+    static func announcements(eventsData: Data?, historyData: Data?,
+                              resolvedLinks: [URL: URL] = [:]) -> [ResetAnnouncement] {
         let textPosts = historyData.map(parseHistory) ?? []
         let linkedPosts = eventsData.map(parseEvents) ?? []
-        return merge(base: textPosts, supplements: linkedPosts)
+        let shortConfirmations = linkedShortCompletions(eventsData: eventsData, historyData: historyData,
+                                                       resolvedLinks: resolvedLinks)
+        return merge(base: merge(base: textPosts, supplements: shortConfirmations), supplements: linkedPosts)
+    }
+
+    /// Only these bounded, official completion candidates need a short-link lookup.
+    /// A successful lookup alone is not completion evidence; the target must also
+    /// match a verified typed preview in the existing event feed.
+    static func shortCompletionLinks(historyData: Data?) -> [URL] {
+        var seen = Set<URL>()
+        return Array(shortCompletionCandidates(historyData).compactMap { candidate in
+            guard isCompletionShortLink(candidate.link), seen.insert(candidate.link).inserted else { return nil }
+            return candidate.link
+        }.prefix(4))
+    }
+
+    private struct ShortCompletionCandidate {
+        let id: String
+        let sourceURL: URL
+        let announcedAt: Date
+        let text: String
+        let kind: String
+        let link: URL
+    }
+
+    private struct LinkedPreview {
+        let id: String
+        let announcedAt: Date
+        let kind: String
+        let scope: String
+        let isRestricted: Bool
+    }
+
+    private static func shortCompletionCandidates(_ data: Data?) -> [ShortCompletionCandidate] {
+        guard let data else { return [] }
+        return historyRows(data).compactMap { row -> ShortCompletionCandidate? in
+            guard let source = row["source"] as? [String: Any],
+                  normalized(source["type"] as? String) == "x_post",
+                  normalized(source["author"] as? String) == "thsottiaux",
+                  let sourceURL = url(source["url"]), let post = officialPost(sourceURL),
+                  let announcedAt = date(row["announced_at"]),
+                  let text = row["text"] as? String, text.count <= 4096,
+                  !targetedScopes.contains(normalized(row["scope"] as? String)),
+                  !isSeparateBenefit(text + " " + (localized(row["title"]) ?? "") + " "
+                                     + (localized(row["summary"]) ?? "")),
+                  let kind = canonicalDeliveryKind(row["reset_type"] as? String), kind != "both" else { return nil }
+            // Do not interpret a free-form "done", quoted statement, hypothetical,
+            // negation or provider-authored summary as an official reset action.
+            guard let link = strictCompletionLink(in: text) else { return nil }
+            return ShortCompletionCandidate(id: post.id, sourceURL: sourceURL, announcedAt: announcedAt,
+                                            text: text, kind: kind, link: link)
+        }.sorted { lhs, rhs in
+            lhs.announcedAt == rhs.announcedAt ? lhs.id > rhs.id : lhs.announcedAt > rhs.announcedAt
+        }
+    }
+
+    private static func strictCompletionLink(in text: String) -> URL? {
+        let pattern = #"\A\s*(?:Done and dusted|It's done|It’s done|All done|Done)[.!]?\s+(https://\S+)\s*\z"#
+        guard text.count <= 4096,
+              let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let linkRange = Range(match.range(at: 1), in: text),
+              let link = URL(string: String(text[linkRange])),
+              isCompletionShortLink(link) || strictOfficialPost(link) != nil else { return nil }
+        return link
+    }
+
+    private static func isCompletionShortLink(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https", url.host?.lowercased() == "t.co",
+              url.user == nil, url.password == nil, url.port == nil,
+              url.query == nil, url.fragment == nil else { return false }
+        return url.path.range(of: #"\A/[A-Za-z0-9]{1,128}\z"#, options: .regularExpression) != nil
+    }
+
+    private static func strictOfficialPost(_ url: URL) -> (id: String, author: String)? {
+        guard url.port == nil, url.query == nil, url.fragment == nil else { return nil }
+        return officialPost(url)
+    }
+
+    private static func linkedShortCompletions(eventsData: Data?, historyData: Data?,
+                                               resolvedLinks: [URL: URL]) -> [ResetAnnouncement] {
+        guard let eventsData, let document = json(eventsData),
+              let events = document["events"] as? [[String: Any]] else { return [] }
+        var previews: [String: [LinkedPreview]] = [:]
+        for event in events {
+            guard normalized(event["lifecycle"] as? String) == "scheduled",
+                  normalized(event["verificationStatus"] as? String) == "primary_verified",
+                  let rawKind = event["resetType"] as? String,
+                  ["automatic_global", "banked"].contains(rawKind),
+                  let evidence = event["evidence"] as? [[String: Any]] else { continue }
+            let kind = rawKind == "banked" ? "banked" : "regular"
+            let scope = normalized(event["scope"] as? String)
+            let eventText = [localized(event["title"]), localized(event["summary"]),
+                             event["targetWindowText"] as? String].compactMap { $0 }.joined(separator: " ")
+            for item in evidence {
+                guard normalized(item["tier"] as? String) == "primary",
+                      normalized(item["verificationStatus"] as? String) == "primary_verified",
+                      ["announcement", "timing_update"].contains(normalized(item["role"] as? String)),
+                      let sourceURL = url(item["sourceUrl"]), let post = strictOfficialPost(sourceURL),
+                      let published = date(item["publishedAt"]) else { continue }
+                let contextText = [eventText, localized(item["text"]), localized(item["excerpt"]),
+                                   localized(item["summary"])].compactMap { $0 }.joined(separator: " ")
+                let restricted = targetedScopes.contains(scope)
+                    || !["", "unspecified", "broad", "all", "global", "general", "codex"].contains(scope)
+                    || isSeparateBenefit(contextText)
+                    || promisedKind(contextText).map { $0 != kind } == true
+                previews[post.id, default: []].append(LinkedPreview(id: post.id, announcedAt: published,
+                    kind: kind, scope: scope.isEmpty ? "unspecified" : scope, isRestricted: restricted))
+            }
+        }
+        return shortCompletionCandidates(historyData).compactMap { candidate in
+            let target = isCompletionShortLink(candidate.link) ? resolvedLinks[candidate.link] : candidate.link
+            guard let target, let targetPost = strictOfficialPost(target), targetPost.id != candidate.id,
+                  let matches = previews[targetPost.id], !matches.isEmpty,
+                  // Conflicting/limited contexts for one source post are ambiguous.
+                  matches.allSatisfy({ !$0.isRestricted && $0.kind == candidate.kind
+                                      && $0.announcedAt < candidate.announcedAt }),
+                  let preview = matches.first else { return nil }
+            return ResetAnnouncement(
+                id: candidate.id, title: candidate.kind == "banked" ? "官方已发放重置券" : "官方已重置额度",
+                summary: candidate.text, sourceURL: candidate.sourceURL, announcedAt: candidate.announcedAt,
+                scheduledFor: nil, kind: candidate.kind, scope: preview.scope, status: "completed",
+                deliveryAt: candidate.announcedAt, relatedAnnouncementIDs: [preview.id],
+                deliveryKind: candidate.kind,
+                completionEvidence: "官方完成帖直接引用已核实的同类型重置预告；按完成帖发布时间计时。"
+            )
+        }
     }
 
     /// General benefit delivery can drive the top-level "reset today" label.
@@ -18,6 +145,9 @@ enum ResetDeliveryEvidence {
 
     static func hasOriginalDeliveryText(_ announcement: ResetAnnouncement) -> Bool {
         deliveryKind(in: announcement.summary) != nil
+            || (announcement.deliveryAt != nil && announcement.relatedAnnouncementIDs?.isEmpty == false
+                && officialPost(announcement.sourceURL) != nil
+                && strictCompletionLink(in: announcement.summary) != nil)
     }
 
     /// Presentation-only compatibility: a later broad official delivery makes
@@ -170,7 +300,7 @@ enum ResetDeliveryEvidence {
                 current.relatedAnnouncementIDs = Array(Set((current.relatedAnnouncementIDs ?? []) + relations)).sorted()
             }
             // The history feed supplies the original text; event summaries are short editorial labels.
-            if deliveryKind(in: incoming.summary) != nil || current.summary.isEmpty {
+            if hasOriginalDeliveryText(incoming) || current.summary.isEmpty {
                 current.summary = incoming.summary
             }
             current.sourceURL = current.sourceURL ?? incoming.sourceURL
@@ -187,13 +317,15 @@ enum ResetDeliveryEvidence {
     private static let terminalStatuses: Set<String> = ["completed", "confirmed", "propagated", "rolling_out", "cancelled", "canceled"]
     private static let targetedScopes: Set<String> = ["limited", "affected", "targeted", "partial", "selected", "individual", "subset"]
 
-    private static func parseHistory(_ data: Data) -> [ResetAnnouncement] {
+    private static func historyRows(_ data: Data) -> [[String: Any]] {
         guard let document = json(data) else { return [] }
-        let rows: [[String: Any]]
-        if let history = document["data"] as? [[String: Any]] { rows = history }
-        else if let status = document["data"] as? [String: Any], let latest = status["latest_reset"] as? [String: Any] { rows = [latest] }
-        else { return [] }
-        return rows.compactMap { row in
+        if let history = document["data"] as? [[String: Any]] { return history }
+        if let status = document["data"] as? [String: Any], let latest = status["latest_reset"] as? [String: Any] { return [latest] }
+        return []
+    }
+
+    private static func parseHistory(_ data: Data) -> [ResetAnnouncement] {
+        historyRows(data).compactMap { row in
             guard let source = row["source"] as? [String: Any],
                   normalized(source["type"] as? String) == "x_post",
                   normalized(source["author"] as? String) == "thsottiaux",
