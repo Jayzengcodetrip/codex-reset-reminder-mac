@@ -50,7 +50,8 @@ struct CodexUsageClient {
 
         return usageSnapshot.replacingResetCredits(
             availableCount: resetCredits.availableCount,
-            credits: resetCredits.availableCredits
+            credits: resetCredits.availableCredits,
+            creditHistory: resetCredits.accountHistory()
         )
     }
 

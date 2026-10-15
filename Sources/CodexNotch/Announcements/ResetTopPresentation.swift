@@ -10,9 +10,11 @@ struct ResetTopPresentation: Equatable {
     var archivedUndated: [String: ResetAnnouncement] = [:]
     var archivedForAccountReceipt: [String: AccountResetReceipt] = [:]
     var latestDeliveryOrigin: ResetDeliveryOrigin? = nil
+    var unconfirmedAccountRecovery: AccountQuotaRecovery? = nil
 
     static func make(pending: [ResetAnnouncement], records: [ResetRecord], now: Date,
-                     accountReceipt: AccountResetReceipt? = nil) -> Self {
+                     accountReceipt: AccountResetReceipt? = nil,
+                     accountRecovery: AccountQuotaRecoveryState? = nil) -> Self {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = ResetScheduleTiming.losAngeles
         let receipt = accountReceipt.flatMap {
@@ -71,17 +73,50 @@ struct ResetTopPresentation: Equatable {
         // The same instant prefers the stronger personal receipt; a later
         // public delivery still moves the clock forward and identifies its origin.
         let useAccountReceipt = receipt.map { $0.grantedAt >= (latestPublicDelivery ?? .distantPast) } ?? false
-        let latestDelivery = useAccountReceipt ? receipt?.grantedAt : latestPublicDelivery
-        let origin: ResetDeliveryOrigin? = latestDelivery == nil ? nil
+        var latestDelivery = useAccountReceipt ? receipt?.grantedAt : latestPublicDelivery
+        let announcementResetToday = latestDelivery.map { calendar.isDate($0, inSameDayAs: now) } ?? false
+        var origin: ResetDeliveryOrigin? = latestDelivery == nil ? nil
             : useAccountReceipt ? .accountReceipt : .publicAnnouncement
+        // Personal recovery is an independent footer signal. It must not affect
+        // pending previews, archival, or the public announcement title's state.
+        if let recovery = accountRecovery?.latestConfirmed,
+           recovery.kind != .unconfirmed, recovery.referenceTime <= now,
+           recovery.confirmedAt <= now {
+            // A later completion post describing this same recovery must not
+            // replace its earlier observed account time with the posting time.
+            let explainsLatestPublic = recovery.kind == .officialTemporary && !useAccountReceipt
+                && records.contains { record in
+                    record.id == recovery.publicCompletionID
+                        && ResetDeliveryEvidence.isGeneralDelivery(record.announcement)
+                        && ResetDeliveryEvidence.deliveryTimestamp(record.announcement) == latestPublicDelivery
+                }
+            if recovery.referenceTime >= (latestDelivery ?? .distantPast) || explainsLatestPublic {
+                if let receipt, receipt.grantedAt > recovery.referenceTime {
+                    latestDelivery = receipt.grantedAt
+                    origin = .accountReceipt
+                } else {
+                    latestDelivery = recovery.referenceTime
+                    origin = .accountRecovery(recovery.kind)
+                }
+            }
+        }
+        let unconfirmed = accountRecovery?.latestUnconfirmed.flatMap { recovery in
+            recovery.detectedAt <= now && recovery.confirmedAt <= now
+                && recovery.detectedAt > (accountRecovery?.latestConfirmed?.detectedAt ?? .distantPast)
+                ? recovery : nil
+        }
         return Self(announcements: visible,
-                    didResetToday: latestDelivery.map { calendar.isDate($0, inSameDayAs: now) } ?? false,
+                    didResetToday: announcementResetToday,
                     secondsSinceLastDelivery: latestDelivery.map { max(0, Int(now.timeIntervalSince($0))) },
                     undatedAnnouncements: undated, archivedUndated: archived,
-                    archivedForAccountReceipt: archivedForAccount, latestDeliveryOrigin: origin)
+                    archivedForAccountReceipt: archivedForAccount, latestDeliveryOrigin: origin,
+                    unconfirmedAccountRecovery: unconfirmed)
     }
 
     func emptyText(language: AppLanguage) -> String {
+        if case .accountRecovery = latestDeliveryOrigin {
+            return language.localized(chinese: "暂无最新重置预告", english: "No new reset announcements")
+        }
         if didResetToday {
             if latestDeliveryOrigin == .accountReceipt {
                 return language.localized(chinese: "暂无最新重置预告（今天已收到重置券）",

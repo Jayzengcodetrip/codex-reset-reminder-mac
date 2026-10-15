@@ -17,9 +17,10 @@ final class NotchViewModel: ObservableObject {
     @Published var resetPreannouncements: [ResetAnnouncement] = []
     @Published var resetRecords: [ResetRecord] = []
     @Published var accountResetReceipt: AccountResetReceipt?
+    @Published var accountQuotaRecovery = AccountQuotaRecoveryState()
     var resetTopPresentation: ResetTopPresentation {
         ResetTopPresentation.make(pending: resetPreannouncements, records: resetRecords, now: now,
-                                  accountReceipt: accountResetReceipt)
+                                  accountReceipt: accountResetReceipt, accountRecovery: accountQuotaRecovery)
     }
 
     var onOpenResetAnnouncements: () -> Void = {}
@@ -335,6 +336,7 @@ struct NotchView: View {
                     resetToday: model.resetTopPresentation.didResetToday,
                     resetElapsedSeconds: model.resetTopPresentation.secondsSinceLastDelivery,
                     resetDeliveryOrigin: model.resetTopPresentation.latestDeliveryOrigin,
+                    resetUnconfirmedRecovery: model.resetTopPresentation.unconfirmedAccountRecovery,
                     onOpenResetAnnouncements: model.onOpenResetAnnouncements,
                     onOpenUndatedAnnouncements: model.onOpenUndatedAnnouncements,
                     onActivateChatGPT: model.onActivateChatGPT,
@@ -1389,6 +1391,7 @@ private struct ExpandedNotchView: View {
     let resetToday: Bool
     let resetElapsedSeconds: Int?
     let resetDeliveryOrigin: ResetDeliveryOrigin?
+    let resetUnconfirmedRecovery: AccountQuotaRecovery?
     let onOpenResetAnnouncements: () -> Void
     let onOpenUndatedAnnouncements: () -> Void
     let onActivateChatGPT: () -> Void
@@ -1435,6 +1438,7 @@ private struct ExpandedNotchView: View {
                 didResetToday: resetToday,
                 secondsSinceLastDelivery: resetElapsedSeconds,
                 latestDeliveryOrigin: resetDeliveryOrigin,
+                unconfirmedRecovery: resetUnconfirmedRecovery,
                 action: onOpenResetAnnouncements,
                 undatedAction: onOpenUndatedAnnouncements
             )

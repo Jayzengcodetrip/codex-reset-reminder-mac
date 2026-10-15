@@ -12,12 +12,19 @@ struct UsageWindow: Equatable, Identifiable, Sendable {
     let kind: UsageWindowKind
     let usedPercent: Double
     let resetAt: Date?
+    /// Preserve the API duration: different 6–8 day windows share the weekly UI label.
+    let windowSeconds: Int?
+    /// Evidence must inspect the original value, not the UI's clamped percentage.
+    let hasValidUsedPercent: Bool
 
-    init(id: String, kind: UsageWindowKind, usedPercent: Double, resetAt: Date? = nil) {
+    init(id: String, kind: UsageWindowKind, usedPercent: Double, resetAt: Date? = nil,
+         windowSeconds: Int? = nil) {
         self.id = id
         self.kind = kind
         self.usedPercent = UsageWindowClassifier.clampPercent(usedPercent)
         self.resetAt = resetAt
+        self.windowSeconds = windowSeconds
+        self.hasValidUsedPercent = usedPercent.isFinite && (0...100).contains(usedPercent)
     }
 
     var remainingPercent: Double {
@@ -47,17 +54,39 @@ struct ResetCredit: Equatable, Identifiable, Sendable {
     }
 }
 
+/// Complete credit detail from one successful dedicated account request.
+/// Missing or malformed history is represented by nil on UsageSnapshot, never an empty success.
+struct AccountCreditHistory: Codable, Equatable, Sendable {
+    let fetchedAt: Date
+    let historyEnabled: Bool
+    let credits: [AccountCreditHistoryEntry]
+}
+
+struct AccountCreditHistoryEntry: Codable, Equatable, Sendable {
+    let id: String
+    let status: String
+    let redeemStartedAt: Date?
+    let redeemedAt: Date?
+    let expiresAt: Date?
+    let grantedAt: Date?
+    let resetType: String?
+}
+
 struct UsageSnapshot: Equatable, Sendable {
     let windows: [UsageWindow]
     let resetCreditsAvailable: Int?
     let resetCredits: [ResetCredit]
     let fetchedAt: Date
+    let planType: String?
+    let creditHistory: AccountCreditHistory?
 
     init(
         windows: [UsageWindow],
         resetCreditsAvailable: Int? = nil,
         resetCredits: [ResetCredit] = [],
-        fetchedAt: Date = .now
+        fetchedAt: Date = .now,
+        planType: String? = nil,
+        creditHistory: AccountCreditHistory? = nil
     ) {
         self.windows = windows
         self.resetCreditsAvailable = resetCreditsAvailable
@@ -72,6 +101,8 @@ struct UsageSnapshot: Equatable, Sendable {
             }
         }
         self.fetchedAt = fetchedAt
+        self.planType = planType
+        self.creditHistory = creditHistory
     }
 
     var weeklyWindow: UsageWindow? {
@@ -90,14 +121,17 @@ struct UsageSnapshot: Equatable, Sendable {
 
     func replacingResetCredits(
         availableCount: Int?,
-        credits: [ResetCredit]
+        credits: [ResetCredit],
+        creditHistory: AccountCreditHistory? = nil
     ) -> UsageSnapshot {
         UsageSnapshot(
             windows: windows,
             resetCreditsAvailable: availableCount
                 ?? (credits.isEmpty ? resetCreditsAvailable : credits.count),
             resetCredits: credits.isEmpty ? resetCredits : credits,
-            fetchedAt: fetchedAt
+            fetchedAt: fetchedAt,
+            planType: planType,
+            creditHistory: creditHistory
         )
     }
 }

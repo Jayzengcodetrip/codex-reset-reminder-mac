@@ -1,12 +1,14 @@
 import Foundation
 
 struct UsageResponseDTO: Decodable {
+    let planType: String?
     let primaryWindow: WindowDTO?
     let secondaryWindow: WindowDTO?
     let rateLimit: RateLimitDTO?
     let rateLimitResetCredits: ResetCreditsDTO?
 
     enum CodingKeys: String, CodingKey {
+        case planType = "plan_type"
         case primaryWindow = "primary_window"
         case secondaryWindow = "secondary_window"
         case rateLimit = "rate_limit"
@@ -26,7 +28,8 @@ struct UsageResponseDTO: Decodable {
             windows: windows,
             resetCreditsAvailable: rateLimitResetCredits?.availableCount,
             resetCredits: rateLimitResetCredits?.availableCredits ?? [],
-            fetchedAt: fetchedAt
+            fetchedAt: fetchedAt,
+            planType: planType
         )
     }
 
@@ -41,7 +44,8 @@ struct UsageResponseDTO: Decodable {
             id: id,
             kind: UsageWindowClassifier.kind(seconds: seconds),
             usedPercent: usedPercent,
-            resetAt: dto.resetAt
+            resetAt: dto.resetAt,
+            windowSeconds: seconds
         )
     }
 }
@@ -86,10 +90,29 @@ struct WindowDTO: Decodable {
 struct ResetCreditsDTO: Decodable {
     let availableCount: Int?
     let credits: [ResetCreditDTO]?
+    let historyEnabled: Bool?
 
     enum CodingKeys: String, CodingKey {
         case availableCount = "available_count"
         case credits
+        case historyEnabled = "history_enabled"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        availableCount = try container.decodeIfPresent(Int.self, forKey: .availableCount)
+        credits = try container.decodeIfPresent([ResetCreditDTO].self, forKey: .credits)
+        // New history metadata must not break existing quota/available-credit display.
+        // A malformed or missing value simply provides no history evidence.
+        historyEnabled = try? container.decode(Bool.self, forKey: .historyEnabled)
+    }
+
+    func accountHistory(fetchedAt: Date = .now) -> AccountCreditHistory? {
+        guard let historyEnabled, let credits else { return nil }
+        let entries = credits.compactMap(\.historyEntry)
+        // One incomplete row invalidates the absence-of-redemption evidence for the whole response.
+        guard entries.count == credits.count, Set(entries.map(\.id)).count == entries.count else { return nil }
+        return AccountCreditHistory(fetchedAt: fetchedAt, historyEnabled: historyEnabled, credits: entries)
     }
 
     var availableCredits: [ResetCredit] {
@@ -119,6 +142,17 @@ struct ResetCreditDTO: Decodable {
     let resetType: String?
     let creditDescription: String?
     let isSupportedByPlan: Bool?
+    let redeemStartedAt: Date?
+    let redeemedAt: Date?
+    private let hasCompleteHistoryFields: Bool
+
+    var historyEntry: AccountCreditHistoryEntry? {
+        guard hasCompleteHistoryFields, let id, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let status, !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return AccountCreditHistoryEntry(id: id, status: status,
+            redeemStartedAt: redeemStartedAt, redeemedAt: redeemedAt,
+            expiresAt: expiresAt, grantedAt: grantedAt, resetType: resetType)
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -129,6 +163,8 @@ struct ResetCreditDTO: Decodable {
         case resetType = "reset_type"
         case creditDescription = "description"
         case isSupportedByPlan = "is_supported_by_plan"
+        case redeemStartedAt = "redeem_started_at"
+        case redeemedAt = "redeemed_at"
     }
 
     init(from decoder: Decoder) throws {
@@ -141,10 +177,26 @@ struct ResetCreditDTO: Decodable {
         resetType = try container.decodeIfPresent(String.self, forKey: .resetType)
         creditDescription = try container.decodeIfPresent(String.self, forKey: .creditDescription)
         isSupportedByPlan = try container.decodeIfPresent(Bool.self, forKey: .isSupportedByPlan)
+        redeemStartedAt = FlexibleDate.decode(from: container, forKey: .redeemStartedAt)
+        redeemedAt = FlexibleDate.decode(from: container, forKey: .redeemedAt)
+        hasCompleteHistoryFields = [CodingKeys.redeemStartedAt, .redeemedAt].allSatisfy { key in
+            FlexibleDate.isValidOrNull(from: container, forKey: key, requirePresence: true)
+        } && [CodingKeys.expiresAt, .grantedAt].allSatisfy { key in
+            FlexibleDate.isValidOrNull(from: container, forKey: key, requirePresence: false)
+        }
     }
 }
 
 private enum FlexibleDate {
+    static func isValidOrNull<Key: CodingKey>(
+        from container: KeyedDecodingContainer<Key>, forKey key: Key, requirePresence: Bool
+    ) -> Bool {
+        guard container.contains(key) else { return !requirePresence }
+        if (try? container.decodeNil(forKey: key)) == true { return true }
+        guard let value = decode(from: container, forKey: key) else { return false }
+        return value.timeIntervalSince1970.isFinite
+    }
+
     static func decode<Key: CodingKey>(
         from container: KeyedDecodingContainer<Key>,
         forKey key: Key

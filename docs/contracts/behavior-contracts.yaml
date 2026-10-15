@@ -2204,3 +2204,45 @@ contracts:
     supersedes: []
     superseded_by: null
     last_verified_commit: null
+
+  - id: ACCOUNT-QUOTA-RECOVERY-001
+    title: Observe account recovery without changing announcement recognition
+    status: active
+    statement: >-
+      Persist a baseline for a hashed account identity and a compatible weekly
+      quota window and plan. A valid raw used percentage must move from nonzero
+      to zero and survive a second valid later sample before recording recovery.
+      First-run snapshots, account or plan changes, invalid percentages, rounded
+      UI values and arbitrary quota increases do not establish recovery. Keep
+      independent successful credit history with real redemption timestamps;
+      missing history or an unexplained disappearance of an unexpired credit is
+      not proof that no credit was used. Distinguish supported manual redemption,
+      an observed weekly boundary, and recovery during a unique compatible
+      official direct reset. Overlapping or insufficient evidence remains
+      unconfirmed while the previous confirmed clock remains visible. Later
+      evidence may resolve or correct attribution without inventing a new recovery.
+      Manual redemption uses its recorded completion timestamp; other personal
+      recovery clocks use first observation and disclose that limitation. Never
+      create, complete, archive, read or notify a public announcement from this
+      account observation. Existing public and banked-credit-grant recognition
+      remain active. Account cache data stays local, excludes tokens and raw
+      account or credit IDs, and is isolated from the public announcement ledger.
+    rationale: Public completion wording can be missed even after account quota has recovered; observing the account adds evidence without inventing official causality.
+    source: user-request
+    owner: local-customization
+    risk: high
+    scope:
+      include: [account-quota-recovery, credit-redemption-evidence, elapsed-timer-origin, account-cache]
+      exclude: [preview-recognition, preview-countdown, public-ledger-mutation, announcement-notification-policy]
+    examples:
+      positive: A manual redemption with an observed quota recovery updates the personal timer, while pending previews and unread flags remain unchanged.
+      negative: Calling a periodic quota refresh an official benefit, treating failed credit history as no redemption, or restarting the timer on each 100-percent sample.
+    guards:
+      - Tests/CodexNotchTests/AccountCreditHistoryTests.swift
+      - Tests/CodexNotchTests/AccountQuotaRecoveryTests.swift
+      - Tests/CodexNotchTests/AccountQuotaRecoveryPresentationTests.swift
+      - Sources/CodexNotch/Usage/AccountQuotaRecoveryCache.swift
+      - "manual: verify the installed public app establishes its real account baseline without replaying a historical reset and keeps quota and credits visible"
+    supersedes: []
+    superseded_by: null
+    last_verified_commit: null

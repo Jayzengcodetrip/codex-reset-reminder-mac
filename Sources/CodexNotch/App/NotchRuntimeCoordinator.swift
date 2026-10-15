@@ -57,6 +57,7 @@ final class NotchRuntimeCoordinator {
     private var titleRefreshInFlight = false
     private var usage: UsageSnapshot?
     private let accountReceiptCache = AccountResetReceiptCache()
+    private let accountRecoveryCache = AccountQuotaRecoveryCache()
     private var receiptAccountID: String?
     private var lastUsageRequestAt: Date?
     private var usageRequestID: UUID?
@@ -77,6 +78,16 @@ final class NotchRuntimeCoordinator {
         if started { render() }
     }
 
+    private var publicQuotaCompletions: [AccountQuotaPublicCompletion] {
+        AccountQuotaRecoveryPublicContext.completions(from: viewModel.resetRecords, now: nowProvider())
+    }
+
+    private func applyAccountQuotaRecovery(_ recovery: AccountQuotaRecoveryState) {
+        guard viewModel.accountQuotaRecovery != recovery else { return }
+        viewModel.accountQuotaRecovery = recovery
+        if started { render() }
+    }
+
     private func applyReceiptAccountIdentity(_ accountID: String?) {
         // Without a stable identity, retaining a prior account's quota is unsafe.
         let changed = receiptAccountID != accountID || accountID == nil
@@ -85,6 +96,7 @@ final class NotchRuntimeCoordinator {
             usage = nil
         }
         applyAccountResetReceipt(accountReceiptCache.receipt(for: accountID, now: nowProvider()))
+        applyAccountQuotaRecovery(accountRecoveryCache.state(for: accountID, now: nowProvider()))
         if changed && started { render() }
     }
 
@@ -95,6 +107,11 @@ final class NotchRuntimeCoordinator {
         viewModel.resetStatusText = status
         viewModel.resetPreannouncements = announcements
         viewModel.resetRecords = records
+        // Reconcile late official evidence without fabricating another quota sample.
+        if let recovery = try? accountRecoveryCache.reconcilePublicCompletions(
+            accountID: receiptAccountID, publicCompletions: publicQuotaCompletions, now: nowProvider()) {
+            applyAccountQuotaRecovery(recovery)
+        }
         viewModel.updateClock(now: nowProvider())
         if started && priorHeight != ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation) { render() }
     }
@@ -415,6 +432,11 @@ final class NotchRuntimeCoordinator {
                         accountID: credentials.accountID, credits: snapshot.resetCredits, now: self.nowProvider()))
                         ?? self.accountReceiptCache.receipt(for: credentials.accountID, now: self.nowProvider())
                     self.applyAccountResetReceipt(receipt)
+                    let recovery = (try? self.accountRecoveryCache.update(
+                        accountID: credentials.accountID, snapshot: snapshot,
+                        publicCompletions: self.publicQuotaCompletions, now: self.nowProvider()))
+                        ?? self.accountRecoveryCache.state(for: credentials.accountID, now: self.nowProvider())
+                    self.applyAccountQuotaRecovery(recovery)
                     self.render()
                 }
             } catch {

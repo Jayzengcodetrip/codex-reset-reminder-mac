@@ -12,6 +12,7 @@ struct ResetAnnouncementEntriesView: View {
     var didResetToday: Bool = false
     var secondsSinceLastDelivery: Int? = nil
     var latestDeliveryOrigin: ResetDeliveryOrigin? = nil
+    var unconfirmedRecovery: AccountQuotaRecovery? = nil
     let action: () -> Void
     var undatedAction: () -> Void = {}
 
@@ -29,25 +30,31 @@ struct ResetAnnouncementEntriesView: View {
     static func height(for presentation: ResetTopPresentation) -> CGFloat {
         height(timedCount: presentation.announcements.count,
                hasUndated: !presentation.undatedAnnouncements.isEmpty,
-               hasDelivery: presentation.secondsSinceLastDelivery != nil)
+               hasDelivery: presentation.secondsSinceLastDelivery != nil,
+               hasUnconfirmed: presentation.unconfirmedAccountRecovery != nil)
     }
 
-    static func height(timedCount: Int, hasUndated: Bool, hasDelivery: Bool) -> CGFloat {
+    static func height(timedCount: Int, hasUndated: Bool, hasDelivery: Bool,
+                       hasUnconfirmed: Bool = false) -> CGFloat {
+        let footer = (hasDelivery ? deliveryHeight + 8 : 0) + (hasUnconfirmed ? deliveryHeight + 8 : 0)
         guard timedCount > 0 || hasUndated else {
-            return ResetAnnouncementEntryView.emptyHeight + (hasDelivery ? deliveryHeight + 8 : 0)
+            return ResetAnnouncementEntryView.emptyHeight + footer
         }
         let count = timedCount + (hasUndated ? 1 : 0)
         let cards = CGFloat(timedCount) * ResetAnnouncementEntryView.announcementHeight
             + (hasUndated ? summaryHeight : 0) + CGFloat(max(0, count - 1)) * 8
-        return min(maximumHeight, cards + (hasDelivery ? deliveryHeight + 8 : 0))
+        return min(maximumHeight, cards + footer)
     }
 
     private var hasActive: Bool { !announcements.isEmpty || !undatedAnnouncements.isEmpty }
     private var height: CGFloat {
         Self.height(timedCount: announcements.count, hasUndated: !undatedAnnouncements.isEmpty,
-                    hasDelivery: secondsSinceLastDelivery != nil)
+                    hasDelivery: secondsSinceLastDelivery != nil, hasUnconfirmed: unconfirmedRecovery != nil)
     }
-    private var footerHeight: CGFloat { secondsSinceLastDelivery != nil ? Self.deliveryHeight + 8 : 0 }
+    private var footerHeight: CGFloat {
+        (secondsSinceLastDelivery != nil ? Self.deliveryHeight + 8 : 0)
+            + (unconfirmedRecovery != nil ? Self.deliveryHeight + 8 : 0)
+    }
     private var contentHeight: CGFloat {
         guard hasActive else { return ResetAnnouncementEntryView.emptyHeight }
         let count = announcements.count + (undatedAnnouncements.isEmpty ? 0 : 1)
@@ -83,8 +90,28 @@ struct ResetAnnouncementEntriesView: View {
                 .padding(.horizontal, 4)
                 .frame(height: Self.deliveryHeight)
             }
+            if let recovery = unconfirmedRecovery {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Self.unconfirmedHeading(language: language))
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+                    Text(language.localized(chinese: "确认原因后更新重置计时", english: "Reset timer updates when the cause is confirmed"))
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+                .frame(height: Self.deliveryHeight)
+                .accessibilityElement(children: .combine)
+                .help(language.localized(chinese: "首次检测：", english: "First detected: ")
+                      + ResetAnnouncementDisplay.beijingTimestamp(recovery.detectedAt) + " (UTC+8)")
+            }
         }
         .frame(height: height)
+    }
+
+    static func unconfirmedHeading(language: AppLanguage) -> String {
+        language.localized(chinese: "本账户额度已恢复 · 方式待确认", english: "Account quota recovered · Cause unconfirmed")
     }
 
     static func deliveryAgeHeading(origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
@@ -96,6 +123,22 @@ struct ResetAnnouncementEntriesView: View {
     }
 
     static func deliveryFootnote(origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
+        if case let .accountRecovery(kind) = origin {
+            switch kind {
+            case .manualCredit:
+                return language.localized(chinese: "手动用券 · 按重置券兑换完成时间计时",
+                                          english: "Manual credit · From the recorded redemption time")
+            case .weekly:
+                return language.localized(chinese: "正常周重置 · 按首次检测到恢复的时间计时",
+                                          english: "Weekly reset · From the first recovery observation")
+            case .officialTemporary:
+                return language.localized(chinese: "官方临时重置期间恢复 · 按首次检测时间计时",
+                                          english: "Recovered during an official reset · From first detection")
+            case .unconfirmed:
+                return language.localized(chinese: "本账户额度已恢复 · 方式待确认",
+                                          english: "Account quota recovered · Cause unconfirmed")
+            }
+        }
         if origin == .accountReceipt {
             return language.localized(chinese: "按本账户重置券发放时间计时，需自行使用",
                                       english: "From this account's credit grant; redeem it yourself")
@@ -201,6 +244,9 @@ struct ResetAnnouncementEntryView: View {
     let action: () -> Void
 
     static func emptyHeadline(didResetToday: Bool, origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
+        if case .accountRecovery = origin {
+            return language.localized(chinese: "暂无最新重置预告", english: "No new reset announcements")
+        }
         if origin == .accountReceipt {
             return language.localized(chinese: "暂无最新重置预告",
                                       english: "No new reset announcements")
