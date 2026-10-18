@@ -17,7 +17,7 @@ final class ResetAccountReceiptUITests: XCTestCase {
         XCTAssertEqual(presentation.secondsSinceLastDelivery, 60)
         XCTAssertEqual(noDelivery, ResetAnnouncementEntryView.emptyHeight)
         XCTAssertEqual(withDelivery,
-                       ResetAnnouncementEntryView.emptyHeight + ResetAnnouncementEntriesView.deliveryHeight + 8)
+                       ResetAnnouncementEntryView.emptyHeight + ResetAnnouncementEntriesView.deliveryHeight + ResetAnnouncementEntriesView.sectionSpacing)
         XCTAssertEqual(ResetAnnouncementEntriesView.height(for: presentation), withDelivery)
         XCTAssertEqual(ResetAnnouncementEntryView.emptyHeadline(
             didResetToday: true, origin: .accountReceipt, language: .chinese),

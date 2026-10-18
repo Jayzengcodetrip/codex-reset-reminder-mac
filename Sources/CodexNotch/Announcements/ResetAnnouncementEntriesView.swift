@@ -18,8 +18,13 @@ struct ResetAnnouncementEntriesView: View {
     var confirmAction: (String) -> Void = { _ in }
 
     static let summaryHeight: CGFloat = 120
-    static let deliveryHeight: CGFloat = 34
+    static let deliveryHeight: CGFloat = 30
+    static let sectionSpacing: CGFloat = 6
     static let maximumHeight: CGFloat = 284
+
+    static func deliveryFooterHeight(origin: ResetDeliveryOrigin?) -> CGFloat {
+        origin == .manualConfirmation ? 16 : deliveryHeight
+    }
 
     // Retained for existing callers that only have timed countdowns.
     static func height(for count: Int) -> CGFloat {
@@ -32,12 +37,15 @@ struct ResetAnnouncementEntriesView: View {
         height(timedCount: presentation.announcements.count,
                hasUndated: !presentation.undatedAnnouncements.isEmpty,
                hasDelivery: presentation.secondsSinceLastDelivery != nil,
-               hasUnconfirmed: presentation.unconfirmedAccountRecovery != nil)
+               hasUnconfirmed: presentation.unconfirmedAccountRecovery != nil,
+               deliveryOrigin: presentation.latestDeliveryOrigin)
     }
 
     static func height(timedCount: Int, hasUndated: Bool, hasDelivery: Bool,
-                       hasUnconfirmed: Bool = false) -> CGFloat {
-        let footer = (hasDelivery ? deliveryHeight + 8 : 0) + (hasUnconfirmed ? deliveryHeight + 8 : 0)
+                       hasUnconfirmed: Bool = false,
+                       deliveryOrigin: ResetDeliveryOrigin? = nil) -> CGFloat {
+        let footer = (hasDelivery ? deliveryFooterHeight(origin: deliveryOrigin) + sectionSpacing : 0)
+            + (hasUnconfirmed ? deliveryHeight + sectionSpacing : 0)
         guard timedCount > 0 || hasUndated else {
             return ResetAnnouncementEntryView.emptyHeight + footer
         }
@@ -50,11 +58,12 @@ struct ResetAnnouncementEntriesView: View {
     private var hasActive: Bool { !announcements.isEmpty || !undatedAnnouncements.isEmpty }
     private var height: CGFloat {
         Self.height(timedCount: announcements.count, hasUndated: !undatedAnnouncements.isEmpty,
-                    hasDelivery: secondsSinceLastDelivery != nil, hasUnconfirmed: unconfirmedRecovery != nil)
+                    hasDelivery: secondsSinceLastDelivery != nil, hasUnconfirmed: unconfirmedRecovery != nil,
+                    deliveryOrigin: latestDeliveryOrigin)
     }
     private var footerHeight: CGFloat {
-        (secondsSinceLastDelivery != nil ? Self.deliveryHeight + 8 : 0)
-            + (unconfirmedRecovery != nil ? Self.deliveryHeight + 8 : 0)
+        (secondsSinceLastDelivery != nil ? Self.deliveryFooterHeight(origin: latestDeliveryOrigin) + Self.sectionSpacing : 0)
+            + (unconfirmedRecovery != nil ? Self.deliveryHeight + Self.sectionSpacing : 0)
     }
     private var contentHeight: CGFloat {
         guard hasActive else { return ResetAnnouncementEntryView.emptyHeight }
@@ -64,7 +73,7 @@ struct ResetAnnouncementEntriesView: View {
     }
 
     var body: some View {
-        VStack(spacing: footerHeight > 0 ? 8 : 0) {
+        VStack(spacing: footerHeight > 0 ? Self.sectionSpacing : 0) {
             Group {
                 if contentHeight > height - footerHeight {
                     ScrollView(.vertical) { cards }
@@ -92,7 +101,7 @@ struct ResetAnnouncementEntriesView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
-                .frame(height: Self.deliveryHeight)
+                .frame(height: Self.deliveryFooterHeight(origin: latestDeliveryOrigin))
             }
             if let recovery = unconfirmedRecovery {
                 VStack(alignment: .leading, spacing: 2) {
@@ -237,7 +246,7 @@ struct ResetAnnouncementEntriesView: View {
 
 /// A stable-height entry keeps announcement updates from moving the quota card.
 struct ResetAnnouncementEntryView: View {
-    static let emptyHeight: CGFloat = 96
+    static let emptyHeight: CGFloat = 64
     static let announcementHeight: CGFloat = 138
 
     let unreadCount: Int

@@ -1456,19 +1456,19 @@ private struct ExpandedNotchView: View {
             )
 
             if !content.conversations.isEmpty {
-                Spacer(minLength: 8)
+                Color.clear.frame(height: 8)
 
                 Rectangle()
                     .fill(NotchPalette.border)
                     .frame(height: 0.5)
 
-                Spacer(minLength: 8)
+                Color.clear.frame(height: 8)
 
                 Text(language.localized(chinese: "最近对话", english: "Recent conversations"))
                     .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                     .foregroundStyle(NotchPalette.secondaryText)
 
-                Spacer(minLength: 6)
+                Color.clear.frame(height: 6)
 
                 VStack(spacing: 0) {
                     ForEach(
@@ -1498,7 +1498,7 @@ private struct ExpandedNotchView: View {
                 }
             }
 
-            Spacer(minLength: 6)
+            Color.clear.frame(height: NotchExpandedLayout.footerSpacing)
 
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
@@ -1591,7 +1591,7 @@ private struct ExpandedNotchView: View {
         // The panel itself attaches to the physical notch. Only the content
         // moves down, so the progress bar and text stay on drawable pixels.
         .padding(.top, expandedContentTopInset)
-        .padding(.bottom, 10)
+        .padding(.bottom, NotchExpandedLayout.contentBottomInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
@@ -1611,9 +1611,9 @@ private struct ExpandedNotchView: View {
 
     private var expandedContentTopInset: CGFloat {
         if layoutMode == .floatingBar {
-            return compactHeight + 8
+            return compactHeight + NotchExpandedLayout.contentTopSpacing
         }
-        return cameraSafeAreaInset + 8
+        return cameraSafeAreaInset + NotchExpandedLayout.contentTopSpacing
     }
 
     private var headerIcon: CompactNotchView.IconKind {
@@ -1788,7 +1788,7 @@ private struct QuotaWindowsProgressView: View {
     }
 
     var body: some View {
-        VStack(spacing: 7) {
+        VStack(spacing: NotchExpandedLayout.quotaWindowSpacing) {
             if let fiveHourWindow {
                 QuotaWindowProgressRow(
                     kind: .rolling(hours: 5),
@@ -1811,7 +1811,7 @@ private struct QuotaWindowsProgressView: View {
                 onExpandedChanged: onResetScheduleExpandedChanged
             )
         }
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .top)
         .animation(.easeInOut(duration: 0.28), value: weeklyWindow?.remainingPercent ?? 0)
         .animation(.easeInOut(duration: 0.28), value: fiveHourWindow?.remainingPercent ?? 0)
     }
@@ -1829,7 +1829,7 @@ private struct QuotaWindowProgressRow: View {
     }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             HStack {
                 Text(NotchText.quotaWindowTitle(kind, language: language))
                     .font(.system(size: 12.5, weight: .semibold, design: .rounded))
@@ -1876,7 +1876,8 @@ private struct QuotaWindowProgressRow: View {
                     .lineLimit(1)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, minHeight: NotchExpandedLayout.quotaRowHeight,
+               maxHeight: NotchExpandedLayout.quotaRowHeight, alignment: .top)
     }
 
     private var resetTimestampText: String {
@@ -1939,7 +1940,8 @@ private struct ResetScheduleDisclosure: View {
                         : NotchPalette.primaryText.opacity(0.82)
                 )
                 .padding(.horizontal, 10)
-                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: NotchExpandedLayout.resetScheduleControlHeight,
+                       maxHeight: NotchExpandedLayout.resetScheduleControlHeight, alignment: .leading)
                 .background(
                     credits.isEmpty
                         ? NotchPalette.row.opacity(0.35)

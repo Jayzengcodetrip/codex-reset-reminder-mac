@@ -153,10 +153,10 @@ final class NotchGeometryTests: XCTestCase {
         XCTAssertEqual(layout.compactFrame.midX, 755.5, accuracy: 0.1)
         XCTAssertEqual(layout.compactFrame.maxY, 982, accuracy: 0.1)
         XCTAssertEqual(layout.quotaExpandedFrame.width, 420, accuracy: 0.1)
-        XCTAssertEqual(layout.quotaExpandedFrame.height, 202, accuracy: 0.1)
+        XCTAssertEqual(layout.quotaExpandedFrame.height, 164, accuracy: 0.1)
         XCTAssertEqual(layout.quotaExpandedFrame.maxY, 982, accuracy: 0.1)
         XCTAssertEqual(layout.expandedFrame.width, 420, accuracy: 0.1)
-        XCTAssertEqual(layout.expandedFrame.height, 322, accuracy: 0.1)
+        XCTAssertEqual(layout.expandedFrame.height, 281, accuracy: 0.1)
         XCTAssertEqual(layout.expandedFrame.maxY, 982, accuracy: 0.1)
     }
 

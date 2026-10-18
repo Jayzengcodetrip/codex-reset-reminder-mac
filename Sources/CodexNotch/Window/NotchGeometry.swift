@@ -121,14 +121,20 @@ enum NotchFloatingBarLayout {
 
 enum NotchExpandedLayout {
     static let width: CGFloat = 420
-    static let resetScheduleControlHeight: CGFloat = 39
-    static let settingsFooterHeight: CGFloat = 30
-    static let quotaContentHeight: CGFloat = 101
-        + resetScheduleControlHeight
-        + settingsFooterHeight
-    static let twoConversationContentHeight: CGFloat = 221
-        + resetScheduleControlHeight
-        + settingsFooterHeight
+    static let contentTopSpacing: CGFloat = 8
+    static let contentBottomInset: CGFloat = 8
+    static let quotaRowHeight: CGFloat = 48
+    static let quotaWindowSpacing: CGFloat = 6
+    static let resetScheduleControlHeight: CGFloat = 30
+    static let footerSpacing: CGFloat = 8
+    static let settingsFooterHeight: CGFloat = 24
+    // Match the actual rows and fixed gaps instead of stretching spacers to
+    // fill a legacy canvas. Announcement content is added independently.
+    static let quotaContentHeight: CGFloat = contentTopSpacing
+        + quotaRowHeight + quotaWindowSpacing + resetScheduleControlHeight
+        + footerSpacing + settingsFooterHeight + contentBottomInset
+    static let twoConversationContentHeight: CGFloat = quotaContentHeight
+        + 36.5 + conversationRowHeight * 2 + conversationSeparatorHeight
     static let conversationRowHeight: CGFloat = 40
     static let conversationSeparatorHeight: CGFloat = 0.5
     static let resetScheduleRowHeight: CGFloat = 34
@@ -136,7 +142,7 @@ enum NotchExpandedLayout {
     static let resetScheduleDetailVerticalPadding: CGFloat = 6
     // The base quota height reserves the weekly row. Add one measured row when
     // the usage response also contains the five-hour rolling limit.
-    static let fiveHourQuotaContentHeight: CGFloat = 58
+    static let fiveHourQuotaContentHeight: CGFloat = quotaRowHeight + quotaWindowSpacing
 
     static func quotaContentSize(
         isResetScheduleExpanded: Bool = false,

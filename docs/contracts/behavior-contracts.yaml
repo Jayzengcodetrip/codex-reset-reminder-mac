@@ -2283,3 +2283,35 @@ contracts:
     supersedes: []
     superseded_by: null
     last_verified_commit: null
+
+  - id: NOTCH-EXPANDED-DENSITY-001
+    title: Expanded height follows readable content without stretched blank space
+    status: active
+    statement: >-
+      Use a shorter empty announcement card and a single-line height for the
+      manual elapsed footer. Derive the quota canvas from the visible quota row,
+      credit control, action footer and fixed gaps. Vertical spacers must not
+      expand to consume unused height. Keep text sizes, 420pt expanded width,
+      compact camera geometry, top anchoring and clickable controls. An extra
+      quota window, credit-expiry rows and recent conversations add their needed
+      height; independent dated previews remain legible and excess announcement
+      content scrolls within its bounded area. Preserve all reset, unread,
+      manual-confirmation and timing semantics.
+    rationale: The empty state reserved a tall announcement and a legacy canvas whose flexible spacers spread a small amount of content over most of the panel.
+    source: user-request
+    owner: local-customization
+    risk: medium
+    scope:
+      include: [expanded-content-height, vertical-spacing, announcement-footer, quota-layout]
+      exclude: [compact-geometry, recognition, notifications, data-persistence]
+    examples:
+      positive: An empty preview with a manual elapsed timer stays compact, while expanding two credit rows grows downward by exactly the list height.
+      negative: Unused space stretches above the action footer, a short canvas clips a countdown, or shrinking the content moves the compact indicators.
+    guards:
+      - Tests/CodexNotchTests/CompactExpandedLayoutTests.swift
+      - Tests/CodexNotchTests/NotchGeometryTests.swift
+      - Tests/CodexNotchTests/ResetAccountReceiptUITests.swift
+      - "manual: inspect empty, unread failure, undated, two countdowns, extra quota, credit expansion and conversation states in a synthetic production-view window; verify the installed real empty state"
+    supersedes: []
+    superseded_by: null
+    last_verified_commit: null
