@@ -81,11 +81,14 @@ struct ResetAnnouncementEntriesView: View {
                         .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(Color.mint)
-                    Text(Self.deliveryFootnote(origin: latestDeliveryOrigin, language: language))
-                        .font(.system(size: 9))
-                        .foregroundStyle(Color.white.opacity(0.6))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    let footnote = Self.deliveryFootnote(origin: latestDeliveryOrigin, language: language)
+                    if !footnote.isEmpty {
+                        Text(footnote)
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.white.opacity(0.6))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
@@ -125,8 +128,7 @@ struct ResetAnnouncementEntriesView: View {
 
     static func deliveryFootnote(origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
         if origin == .manualConfirmation {
-            return language.localized(chinese: "人工确认完成 · 从点击确认时刻计时",
-                                      english: "Manually confirmed · From the time you confirmed")
+            return ""
         }
         if case let .accountRecovery(kind) = origin {
             switch kind {

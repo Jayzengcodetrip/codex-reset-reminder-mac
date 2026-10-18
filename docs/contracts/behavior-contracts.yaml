@@ -2257,7 +2257,8 @@ contracts:
       failure preserves the prior state. Repeated confirmation is idempotent.
       Same-post aliases, in-flight refreshes and restart retain the confirmation.
       The selected preview leaves pending presentation and the elapsed clock uses
-      the click time with manual provenance; unrelated previews remain active.
+      the click time with manual provenance retained in history; the compact footer
+      omits the manual-confirmation explanatory line. Unrelated previews remain active.
       Related late official completion cannot move that event's manual clock,
       while an independent later reset remains eligible. Confirmation and undo
       neither clear unread state nor send announcement notifications. History

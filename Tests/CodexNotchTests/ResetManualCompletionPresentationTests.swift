@@ -20,7 +20,7 @@ final class ResetManualCompletionPresentationTests: XCTestCase {
         XCTAssertEqual(ResetAnnouncementEntriesView.deliveryAgeHeading(origin: result.latestDeliveryOrigin,
             language: .chinese), "距上次重置已过 ")
         XCTAssertEqual(ResetAnnouncementEntriesView.deliveryFootnote(origin: result.latestDeliveryOrigin,
-            language: .chinese), "人工确认完成 · 从点击确认时刻计时")
+            language: .chinese), "")
         let later = ResetTopPresentation.make(pending: [], records: [manual, previous],
                                               now: now.addingTimeInterval(91))
         XCTAssertEqual(later.secondsSinceLastDelivery, 91)
