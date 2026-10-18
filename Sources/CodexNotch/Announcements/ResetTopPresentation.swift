@@ -20,9 +20,23 @@ struct ResetTopPresentation: Equatable {
         let receipt = accountReceipt.flatMap {
             $0.grantedAt <= now && ResetDeliveryEvidence.isGeneralAccountReceipt($0) ? $0 : nil
         }
+        let manualRecords = records.filter {
+            guard let time = $0.manualCompletedAt else { return false }
+            return time.timeIntervalSince1970.isFinite && time.timeIntervalSince1970 > 0 && time <= now
+        }
+        let latestManual = manualRecords.compactMap(\.manualCompletedAt).max()
+        func manuallyConfirmedEvent(_ announcement: ResetAnnouncement) -> Bool {
+            manualRecords.contains { record in
+                if ResetPendingAnnouncements.sameIdentity(record.announcement, announcement) { return true }
+                let related = announcement.relatedAnnouncementIDs ?? []
+                return related.contains(record.id)
+                    || (record.announcement.sourceURL?.lastPathComponent).map(related.contains) == true
+            }
+        }
         let active = pending.filter { announcement in
             let status = normalizedStatus(announcement)
-            return !deliveryStatuses.contains(status) && !["cancelled", "canceled"].contains(status)
+            return !manuallyConfirmedEvent(announcement)
+                && !deliveryStatuses.contains(status) && !["cancelled", "canceled"].contains(status)
         }
         let visible = active.filter { announcement in
             guard let target = ResetScheduleTiming.target(for: announcement) else { return false }
@@ -62,7 +76,8 @@ struct ResetTopPresentation: Equatable {
         }
         let latestPublicDelivery = records.compactMap { record -> Date? in
             let announcement = record.announcement
-            guard ResetDeliveryEvidence.isGeneralDelivery(announcement) else { return nil }
+            guard ResetDeliveryEvidence.isGeneralDelivery(announcement),
+                  !manuallyConfirmedEvent(announcement) else { return nil }
             // A completion post can use its publication time. A preannouncement
             // with a scheduled target cannot use its original post time as delivery.
             let delivery = announcement.deliveryAt
@@ -81,7 +96,10 @@ struct ResetTopPresentation: Equatable {
         // pending previews, archival, or the public announcement title's state.
         if let recovery = accountRecovery?.latestConfirmed,
            recovery.kind != .unconfirmed, recovery.referenceTime <= now,
-           recovery.confirmedAt <= now {
+           recovery.confirmedAt <= now,
+           !(recovery.kind == .officialTemporary && records.contains {
+               $0.id == recovery.publicCompletionID && manuallyConfirmedEvent($0.announcement)
+           }) {
             // A later completion post describing this same recovery must not
             // replace its earlier observed account time with the posting time.
             let explainsLatestPublic = recovery.kind == .officialTemporary && !useAccountReceipt
@@ -100,9 +118,14 @@ struct ResetTopPresentation: Equatable {
                 }
             }
         }
+        if let latestManual, latestManual >= (latestDelivery ?? .distantPast) {
+            latestDelivery = latestManual
+            origin = .manualConfirmation
+        }
         let unconfirmed = accountRecovery?.latestUnconfirmed.flatMap { recovery in
             recovery.detectedAt <= now && recovery.confirmedAt <= now
                 && recovery.detectedAt > (accountRecovery?.latestConfirmed?.detectedAt ?? .distantPast)
+                && recovery.detectedAt > (latestManual ?? .distantPast)
                 ? recovery : nil
         }
         return Self(announcements: visible,
@@ -114,6 +137,9 @@ struct ResetTopPresentation: Equatable {
     }
 
     func emptyText(language: AppLanguage) -> String {
+        if latestDeliveryOrigin == .manualConfirmation {
+            return language.localized(chinese: "暂无最新重置预告", english: "No new reset announcements")
+        }
         if case .accountRecovery = latestDeliveryOrigin {
             return language.localized(chinese: "暂无最新重置预告", english: "No new reset announcements")
         }

@@ -93,6 +93,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeCoordinator?.onOpenResetAnnouncements = { [weak experience] in
             experience?.showAnnouncements()
         }
+        runtimeCoordinator?.onConfirmResetManually = { [weak experience] id in
+            guard let experience else { return }
+            if !experience.monitor.confirmResetManually(id: id),
+               experience.monitor.manualConfirmationErrorMessage != nil {
+                experience.showAnnouncements()
+            }
+        }
         runtimeCoordinator?.onOpenUndatedAnnouncements = { [weak experience] in
             experience?.showUndatedAnnouncements()
         }

@@ -11,6 +11,7 @@ final class ResetMonitor: ObservableObject {
     @Published private(set) var sourceCheckedAt: Date?
     @Published private(set) var sourceIsFresh = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var manualConfirmationErrorMessage: String?
     @Published private(set) var hasNewPreannouncement = false
     var unreadCount: Int { records.filter(\.isUnread).count }
     var awayUnreadCount: Int { records.filter { $0.isUnread && $0.occurredWhileAway }.count }
@@ -182,6 +183,53 @@ final class ResetMonitor: ObservableObject {
         } catch {
             errorMessage = "已读状态未能保存，公告仍保留为未读。"
             onChange?()
+        }
+    }
+
+    func canConfirmResetManually(id: String) -> Bool {
+        !storageLoadFailed && ledger.canConfirmResetManually(id: id)
+    }
+
+    @discardableResult
+    func confirmResetManually(id: String) -> Bool {
+        guard !storageLoadFailed else {
+            manualConfirmationErrorMessage = "无法读取本地公告记录，人工确认未保存。请重新打开应用后重试。"
+            onChange?()
+            return false
+        }
+        var candidate = ledger
+        guard candidate.confirmResetManually(id: id, at: now()) else { return false }
+        return saveManualConfirmation(candidate, undo: false)
+    }
+
+    @discardableResult
+    func undoManualResetConfirmation(id: String) -> Bool {
+        guard !storageLoadFailed else { return false }
+        var candidate = ledger
+        guard candidate.undoManualResetConfirmation(id: id) else { return false }
+        return saveManualConfirmation(candidate, undo: true)
+    }
+
+    func clearManualConfirmationError() {
+        manualConfirmationErrorMessage = nil
+    }
+
+    private func saveManualConfirmation(_ candidate: ResetLedger, undo: Bool) -> Bool {
+        do {
+            // No suspension occurs between copying the latest ledger, atomic
+            // persistence and publishing. A response in flight ingests into the
+            // then-current ledger on MainActor and cannot overwrite this edit.
+            try store.save(candidate)
+            ledger = candidate
+            manualConfirmationErrorMessage = nil
+            publishLedger()
+            return true
+        } catch {
+            manualConfirmationErrorMessage = undo
+                ? "撤销未能保存，仍保留原来的人工确认。请稍后重试。"
+                : "人工确认未能保存，预告和重置计时未改变。请稍后重试。"
+            onChange?()
+            return false
         }
     }
 

@@ -68,6 +68,7 @@ final class NotchRuntimeCoordinator {
     private var visibilityShortcut: NotchVisibilityShortcut?
 
     var onOpenResetAnnouncements: (() -> Void)?
+    var onConfirmResetManually: ((String) -> Void)?
     var onOpenUndatedAnnouncements: (() -> Void)?
     var onAccountResetReceiptChange: ((AccountResetReceipt?) -> Void)?
 
@@ -183,6 +184,9 @@ final class NotchRuntimeCoordinator {
         }
         viewModel.onOpenResetAnnouncements = { [weak self] in
             self?.onOpenResetAnnouncements?()
+        }
+        viewModel.onConfirmResetManually = { [weak self] id in
+            self?.onConfirmResetManually?(id)
         }
 
         viewModel.onOpenUndatedAnnouncements = { [weak self] in

@@ -12,4 +12,5 @@ enum ResetDeliveryOrigin: Equatable, Sendable {
     case publicAnnouncement
     case accountReceipt
     case accountRecovery(AccountQuotaRecoveryKind)
+    case manualConfirmation
 }

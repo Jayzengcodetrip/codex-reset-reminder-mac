@@ -99,6 +99,10 @@ struct ResetAnnouncementsView: View {
                             announcement: record.announcement, language: language,
                             laterDelivery: presentation.archivedUndated[record.id],
                             laterAccountReceipt: presentation.archivedForAccountReceipt[record.id],
+                            manualCompletedAt: record.manualCompletedAt,
+                            canConfirmManually: monitor.canConfirmResetManually(id: record.id),
+                            onConfirmManually: { monitor.confirmResetManually(id: record.id) },
+                            onUndoManualConfirmation: { monitor.undoManualResetConfirmation(id: record.id) },
                             onOpenDelivery: { delivery in
                                 navigation.showDelivery(id: delivery.id, markRead: monitor.markRead)
                             }
@@ -123,6 +127,17 @@ struct ResetAnnouncementsView: View {
         .frame(minWidth: 600, idealWidth: 660, minHeight: 560, idealHeight: 620)
         .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(.dark)
+        .alert(label("操作未保存", "Unable to save"), isPresented: Binding(
+            get: { monitor.manualConfirmationErrorMessage != nil },
+            set: { if !$0 { monitor.clearManualConfirmationError() } }
+        )) {
+            Button(label("好", "OK"), role: .cancel) {
+                monitor.clearManualConfirmationError()
+            }
+        } message: {
+            Text(monitor.manualConfirmationErrorMessage
+                 ?? label("本次操作未能保存，请稍后重试。", "This change could not be saved. Please try again."))
+        }
     }
 
     private var header: some View {
@@ -243,7 +258,13 @@ struct ResetAnnouncementsView: View {
                     .foregroundStyle(Color.orange)
                     .padding(.leading, 12)
             }
-            if presentation.archivedUndated[record.id] != nil {
+            if record.manualCompletedAt != nil {
+                Text(label("已人工确认重置完成", "Manually confirmed complete"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.mint)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 12)
+            } else if presentation.archivedUndated[record.id] != nil {
                 Text(label("后续已有重置 · 本条关联未确认", "A later reset occurred · Link unconfirmed"))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -320,6 +341,10 @@ private struct ResetAnnouncementDetailView: View {
     let language: AppLanguage
     let laterDelivery: ResetAnnouncement?
     let laterAccountReceipt: AccountResetReceipt?
+    let manualCompletedAt: Date?
+    let canConfirmManually: Bool
+    let onConfirmManually: () -> Void
+    let onUndoManualConfirmation: () -> Void
     let onOpenDelivery: (ResetAnnouncement) -> Void
 
     private func label(_ chinese: String, _ english: String) -> String {
@@ -336,7 +361,30 @@ private struct ResetAnnouncementDetailView: View {
 
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     VStack(alignment: .leading, spacing: 7) {
-                        if let laterDelivery {
+                        if let manualCompletedAt {
+                            Text(label("已人工确认重置完成", "Manually confirmed complete"))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.mint)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(label("人工确认：", "Confirmed by you: ")
+                                 + ResetAnnouncementDisplay.beijingTimestamp(manualCompletedAt)
+                                 + label(" 北京时间", " Beijing"))
+                                .font(.system(size: 11))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                            Text(label("计时从这次人工确认开始；这是你的确认，不代表官方公告。",
+                                       "The timer starts when you confirm. This is your confirmation, not an official announcement."))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button(action: onUndoManualConfirmation) {
+                                Label(label("撤销人工确认", "Undo manual confirmation"), systemImage: "arrow.uturn.backward")
+                            }
+                            .buttonStyle(.link)
+                            .font(.system(size: 12, weight: .medium))
+                            .help(label("撤销这次人工确认；按现有公告与账户记录重新显示状态和计时。",
+                                        "Remove your confirmation and use the remaining announcement and account evidence for the status and timer."))
+                        } else if let laterDelivery {
                             Text(label("后续已有重置 · 本条关联未确认", "A later reset occurred · Link unconfirmed"))
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.secondary)
@@ -396,11 +444,28 @@ private struct ResetAnnouncementDetailView: View {
                                 }
                             }
                         }
-                        if !ResetAnnouncementSummary.isTerminal(announcement) {
+                        if manualCompletedAt == nil && !ResetAnnouncementSummary.isTerminal(announcement) {
                             Text(ResetScheduleTiming.losAngelesNowText(context.date, language: language))
                                 .font(.system(size: 11, design: .rounded))
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
+                        }
+                        if manualCompletedAt == nil && canConfirmManually {
+                            HStack(alignment: .center, spacing: 10) {
+                                Button(action: onConfirmManually) {
+                                    Label(label("确认已重置", "Confirm reset"), systemImage: "checkmark.circle")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(Color.mint)
+                                .controlSize(.small)
+                                .accessibilityLabel(label("人工确认这条预告已重置", "Manually confirm this announcement’s reset"))
+                                Text(label("仅确认这条预告，计时从点击时开始。",
+                                           "Confirms only this announcement; the timer starts now."))
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.top, 4)
                         }
                     }
                     .padding(12)

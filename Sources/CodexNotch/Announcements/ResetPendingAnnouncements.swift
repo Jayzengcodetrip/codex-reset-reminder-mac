@@ -5,27 +5,12 @@ enum ResetPendingAnnouncements {
     /// Oldest publication first; acknowledgement and elapsed time do not remove a notice.
     static func pending(from records: [ResetRecord], versions: [String: [ResetAnnouncement]] = [:]) -> [ResetAnnouncement] {
         let current = records.map(\.announcement)
-        // Historical URL evidence links an alias even after a later revision omits its URL.
-        let evidence = current + versions.values.flatMap { $0 }
-        var parents: [String: String] = [:]
-        func root(_ identity: String) -> String {
-            var value = identity
-            while let parent = parents[value], parent != value { value = parent }
-            return value
-        }
-        for announcement in evidence {
-            let id = "id:\(announcement.id)"
-            if parents[id] == nil { parents[id] = id }
-            if let post = postKey(announcement) {
-                if parents[post] == nil { parents[post] = post }
-                let idRoot = root(id)
-                let postRoot = root(post)
-                if idRoot != postRoot { parents[idRoot] = postRoot }
-            }
-        }
+        let identities = identityKeys(records: records, versions: versions)
+        let manual = manualCompletionDates(records: records, versions: versions)
         let deliveries = current.filter { isTerminal($0) && $0.deliveryAt != nil }
-        let groups = Dictionary(grouping: current) { root("id:\($0.id)") }
+        let groups = Dictionary(grouping: current) { identities[$0.id] ?? $0.id }
         return groups.values.compactMap { group -> ResetAnnouncement? in
+            guard !group.contains(where: { manual[$0.id] != nil }) else { return nil }
             let terminal = group.filter { announcement in
                 if isTerminal(announcement) { return true }
                 guard !isExplicitPending(announcement),
@@ -45,6 +30,54 @@ enum ResetPendingAnnouncements {
                 }
             }.sorted { earlier($1, $0) }.first
         }.sorted(by: earlier)
+    }
+
+    /// Same-post aliases use current and retained historical URLs. Independent
+    /// posts never inherit one another's local confirmation.
+    static func matchingRecordIDs(for id: String, records: [ResetRecord],
+                                  versions: [String: [ResetAnnouncement]] = [:]) -> Set<String> {
+        let identities = identityKeys(records: records, versions: versions)
+        guard let identity = identities[id] else { return [] }
+        return Set(identities.compactMap { $0.value == identity ? $0.key : nil })
+    }
+
+    static func manualCompletionDates(records: [ResetRecord],
+                                      versions: [String: [ResetAnnouncement]] = [:]) -> [String: Date] {
+        let identities = identityKeys(records: records, versions: versions)
+        var dates: [String: Date] = [:]
+        for record in records {
+            guard let time = record.manualCompletedAt, time.timeIntervalSince1970.isFinite,
+                  let identity = identities[record.id] else { continue }
+            dates[identity] = min(dates[identity] ?? time, time)
+        }
+        return identities.compactMapValues { dates[$0] }
+    }
+
+    private static func identityKeys(records: [ResetRecord],
+                                     versions: [String: [ResetAnnouncement]]) -> [String: String] {
+        // Historical URL evidence keeps an alias linked after a sparse revision.
+        let evidence = records.map(\.announcement) + versions.values.flatMap { $0 }
+        var parents: [String: String] = [:]
+        func root(_ identity: String) -> String {
+            var value = identity
+            while let parent = parents[value], parent != value { value = parent }
+            return value
+        }
+        for announcement in evidence {
+            let id = "id:\(announcement.id)"
+            if parents[id] == nil { parents[id] = id }
+            if let post = postKey(announcement) {
+                if parents[post] == nil { parents[post] = post }
+                let idRoot = root(id)
+                let postRoot = root(post)
+                if idRoot != postRoot { parents[idRoot] = postRoot }
+            }
+        }
+        // Callers may project multiple saved versions with the same ID. They
+        // share one identity; duplicates must never crash presentation.
+        return records.reduce(into: [:]) { result, record in
+            result[record.id] = root("id:\(record.id)")
+        }
     }
 
     /// A shared profile/site URL does not identify a particular reset.
@@ -84,7 +117,7 @@ enum ResetPendingAnnouncements {
         announcement.status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
     }
 
-    private static func isTerminal(_ announcement: ResetAnnouncement) -> Bool {
+    static func isTerminal(_ announcement: ResetAnnouncement) -> Bool {
         terminalStatuses.contains(status(announcement))
     }
 

@@ -39,6 +39,11 @@ struct ResetLedger: Codable, Equatable {
         // unique-candidate matching, even when publication times are identical.
         var combined = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0.announcement) })
         for announcement in prepared { combined[announcement.id] = announcement }
+        let manualDates = ResetPendingAnnouncements.manualCompletionDates(records: combined.values.map {
+            ResetRecord(id: $0.id, announcement: $0, isUnread: false, occurredWhileAway: false,
+                        manualCompletedAt: index[$0.id].flatMap { records[$0].manualCompletedAt })
+        }, versions: versions)
+        // Official matching remains based exclusively on public announcement evidence.
         let candidates = ResetPendingAnnouncements.pending(from: combined.values.map {
             ResetRecord(id: $0.id, announcement: $0, isUnread: false, occurredWhileAway: false)
         }, versions: versions)
@@ -53,25 +58,31 @@ struct ResetLedger: Codable, Equatable {
                     // Stale intermediary caches must not replay a previously seen version.
                     if versions[announcement.id, default: []].contains(where: { announcement.hasSameMaterialContent(as: $0) }) { continue }
                     versions[announcement.id, default: [prior.announcement]].append(announcement)
-                    let silentUpdate = historicalDelivery || announcement.supplementsKnownDelivery(prior.announcement)
+                    let manualCompletedAt = manualDates[announcement.id] ?? prior.manualCompletedAt
+                    let silentUpdate = manualCompletedAt != nil || historicalDelivery
+                        || announcement.supplementsKnownDelivery(prior.announcement)
                     let record = ResetRecord(
                         id: announcement.id, announcement: announcement,
                         isUnread: silentUpdate ? prior.isUnread : true,
                         occurredWhileAway: silentUpdate ? prior.occurredWhileAway
-                            : prior.isUnread && prior.occurredWhileAway || occurredWhileAway
+                            : prior.isUnread && prior.occurredWhileAway || occurredWhileAway,
+                        manualCompletedAt: manualCompletedAt
                     )
                     records[existingIndex] = record
                     if !silentUpdate { changed.append(record) }
                 } else {
                     // Non-material source metadata may improve without replaying a notification.
                     records[existingIndex].announcement = announcement
+                    records[existingIndex].manualCompletedAt = manualDates[announcement.id] ?? prior.manualCompletedAt
                 }
             } else {
                 let pending = announcement.status?.lowercased() == "scheduled"
                     || announcement.scheduledFor.map { $0 > now } == true
-                let unread = !historicalDelivery && (!establishingBaseline || pending)
+                let manualCompletedAt = manualDates[announcement.id]
+                let unread = manualCompletedAt == nil && !historicalDelivery && (!establishingBaseline || pending)
                 let record = ResetRecord(id: announcement.id, announcement: announcement, isUnread: unread,
-                                         occurredWhileAway: unread && occurredWhileAway)
+                                         occurredWhileAway: unread && occurredWhileAway,
+                                         manualCompletedAt: manualCompletedAt)
                 index[announcement.id] = records.count
                 records.append(record)
                 versions[announcement.id] = [announcement]
@@ -86,6 +97,39 @@ struct ResetLedger: Codable, Equatable {
         sourceCheckedAt = snapshot.sourceCheckedAt
         sourceIsFresh = snapshot.sourceIsFresh
         return changed
+    }
+
+    func canConfirmResetManually(id: String) -> Bool {
+        let matching = ResetPendingAnnouncements.matchingRecordIDs(for: id, records: records, versions: versions)
+        guard !matching.isEmpty,
+              !records.contains(where: { matching.contains($0.id)
+                  && ($0.manualCompletedAt != nil || ResetPendingAnnouncements.isTerminal($0.announcement)) }),
+              pendingAnnouncements.contains(where: { matching.contains($0.id) }) else { return false }
+        return true
+    }
+
+    /// Ends only this original post's pending reminder. Public content and read
+    /// state remain intact, and duplicate clicks never move the elapsed clock.
+    @discardableResult
+    mutating func confirmResetManually(id: String, at time: Date) -> Bool {
+        guard time.timeIntervalSince1970.isFinite, canConfirmResetManually(id: id) else { return false }
+        let matching = ResetPendingAnnouncements.matchingRecordIDs(for: id, records: records, versions: versions)
+        for index in records.indices where matching.contains(records[index].id) {
+            records[index].manualCompletedAt = time
+        }
+        return true
+    }
+
+    /// Undo removes only local confirmation. Existing official completion or
+    /// cancellation still governs whether the preview can return.
+    @discardableResult
+    mutating func undoManualResetConfirmation(id: String) -> Bool {
+        let matching = ResetPendingAnnouncements.matchingRecordIDs(for: id, records: records, versions: versions)
+        guard records.contains(where: { matching.contains($0.id) && $0.manualCompletedAt != nil }) else { return false }
+        for index in records.indices where matching.contains(records[index].id) {
+            records[index].manualCompletedAt = nil
+        }
+        return true
     }
 
     private func preservingDeliveryEvidence(_ incoming: ResetAnnouncement,

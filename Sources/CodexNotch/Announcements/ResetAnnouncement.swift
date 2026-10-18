@@ -47,6 +47,9 @@ struct ResetRecord: Codable, Identifiable, Equatable {
     var announcement: ResetAnnouncement
     var isUnread: Bool
     var occurredWhileAway: Bool
+    /// Local user confirmation only; never official delivery evidence.
+    /// Optional preserves compatibility with existing schema-one ledgers.
+    var manualCompletedAt: Date? = nil
 }
 
 struct NextResetSnapshot: Equatable {

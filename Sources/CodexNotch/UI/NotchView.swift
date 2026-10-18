@@ -25,6 +25,7 @@ final class NotchViewModel: ObservableObject {
 
     var onOpenResetAnnouncements: () -> Void = {}
     var onOpenUndatedAnnouncements: () -> Void = {}
+    var onConfirmResetManually: (String) -> Void = { _ in }
 
     var onOpenThread: (String) -> Void
     var onActivateChatGPT: () -> Void
@@ -339,6 +340,7 @@ struct NotchView: View {
                     resetUnconfirmedRecovery: model.resetTopPresentation.unconfirmedAccountRecovery,
                     onOpenResetAnnouncements: model.onOpenResetAnnouncements,
                     onOpenUndatedAnnouncements: model.onOpenUndatedAnnouncements,
+                    onConfirmResetManually: model.onConfirmResetManually,
                     onActivateChatGPT: model.onActivateChatGPT,
                     onOpenThread: model.onOpenThread,
                     onResetScheduleExpandedChanged: model.onResetScheduleExpandedChanged,
@@ -1394,6 +1396,7 @@ private struct ExpandedNotchView: View {
     let resetUnconfirmedRecovery: AccountQuotaRecovery?
     let onOpenResetAnnouncements: () -> Void
     let onOpenUndatedAnnouncements: () -> Void
+    let onConfirmResetManually: (String) -> Void
     let onActivateChatGPT: () -> Void
     let onOpenThread: (String) -> Void
     let onResetScheduleExpandedChanged: (Bool) -> Void
@@ -1440,7 +1443,8 @@ private struct ExpandedNotchView: View {
                 latestDeliveryOrigin: resetDeliveryOrigin,
                 unconfirmedRecovery: resetUnconfirmedRecovery,
                 action: onOpenResetAnnouncements,
-                undatedAction: onOpenUndatedAnnouncements
+                undatedAction: onOpenUndatedAnnouncements,
+                confirmAction: onConfirmResetManually
             )
             .padding(.bottom, 8)
 

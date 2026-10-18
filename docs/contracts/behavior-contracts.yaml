@@ -2246,3 +2246,39 @@ contracts:
     supersedes: []
     superseded_by: null
     last_verified_commit: null
+
+  - id: RESET-MANUAL-COMPLETION-001
+    title: Persist explicit manual completion without inventing official evidence
+    status: active
+    statement: >-
+      A user may confirm one pending original-post identity beside its scheduled
+      time or from history. Store the actual click timestamp separately from
+      official announcement fields. Publish completion only after durable save;
+      failure preserves the prior state. Repeated confirmation is idempotent.
+      Same-post aliases, in-flight refreshes and restart retain the confirmation.
+      The selected preview leaves pending presentation and the elapsed clock uses
+      the click time with manual provenance; unrelated previews remain active.
+      Related late official completion cannot move that event's manual clock,
+      while an independent later reset remains eligible. Confirmation and undo
+      neither clear unread state nor send announcement notifications. History
+      retains the original and offers undo, then recomputes from current evidence.
+      Revisions of a manually completed identity are saved silently. No account
+      reset, credit redemption or official evidence is fabricated.
+    rationale: Automatic detection can miss a completed reset; the user needs a durable and reversible explicit fallback.
+    source: user-request
+    owner: local-customization
+    risk: high
+    scope:
+      include: [manual-completion, elapsed-timer-origin, ledger-persistence, preview-actions]
+      exclude: [automatic-detection, account-authentication, credit-redemption, window-geometry]
+    examples:
+      positive: Confirming one of two previews hides only that preview and starts its clock at the click time after saving; undo restores eligible pending state.
+      negative: A failed write still hides the preview, a refresh reopens it, or the app calls the manual timestamp an official reset time.
+    guards:
+      - Tests/CodexNotchTests/ResetManualCompletionTests.swift
+      - Tests/CodexNotchTests/ResetManualCompletionMonitorTests.swift
+      - Tests/CodexNotchTests/ResetManualCompletionPresentationTests.swift
+      - "manual: verify independent confirm and history buttons in an isolated synthetic native window; leave the real user preview for their own confirmation"
+    supersedes: []
+    superseded_by: null
+    last_verified_commit: null

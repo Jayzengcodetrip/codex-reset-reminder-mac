@@ -15,6 +15,7 @@ struct ResetAnnouncementEntriesView: View {
     var unconfirmedRecovery: AccountQuotaRecovery? = nil
     let action: () -> Void
     var undatedAction: () -> Void = {}
+    var confirmAction: (String) -> Void = { _ in }
 
     static let summaryHeight: CGFloat = 120
     static let deliveryHeight: CGFloat = 34
@@ -123,6 +124,10 @@ struct ResetAnnouncementEntriesView: View {
     }
 
     static func deliveryFootnote(origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
+        if origin == .manualConfirmation {
+            return language.localized(chinese: "人工确认完成 · 从点击确认时刻计时",
+                                      english: "Manually confirmed · From the time you confirmed")
+        }
         if case let .accountRecovery(kind) = origin {
             switch kind {
             case .manualCredit:
@@ -163,7 +168,8 @@ struct ResetAnnouncementEntriesView: View {
                         statusText: statusText, announcement: announcement,
                         now: now, language: language, didResetToday: didResetToday,
                         secondsSinceLastDelivery: secondsSinceLastDelivery,
-                        latestDeliveryOrigin: latestDeliveryOrigin, action: action)
+                        latestDeliveryOrigin: latestDeliveryOrigin, action: action,
+                        manualConfirmationAction: { confirmAction(announcement.id) })
                 }
                 if let latest = undatedAnnouncements.last {
                     undatedSummary(latest)
@@ -242,12 +248,13 @@ struct ResetAnnouncementEntryView: View {
     var secondsSinceLastDelivery: Int? = nil
     var latestDeliveryOrigin: ResetDeliveryOrigin? = nil
     let action: () -> Void
+    var manualConfirmationAction: (() -> Void)? = nil
 
     static func emptyHeadline(didResetToday: Bool, origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
         if case .accountRecovery = origin {
             return language.localized(chinese: "暂无最新重置预告", english: "No new reset announcements")
         }
-        if origin == .accountReceipt {
+        if origin == .accountReceipt || origin == .manualConfirmation {
             return language.localized(chinese: "暂无最新重置预告",
                                       english: "No new reset announcements")
         }
@@ -288,53 +295,105 @@ struct ResetAnnouncementEntryView: View {
         return lines.joined(separator: "，")
     }
 
+    static func confirmationLabel(language: AppLanguage) -> String {
+        language.localized(chinese: "确认已重置", english: "Confirm reset")
+    }
+
+    private var confirmationButton: some View {
+        Button(action: { manualConfirmationAction?() }) {
+            Label(Self.confirmationLabel(language: language), systemImage: "checkmark.circle")
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(Color.orange)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.12), in: Capsule())
+                .overlay { Capsule().stroke(Color.orange.opacity(0.4), lineWidth: 0.5) }
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityIdentifier("manual-reset-confirm-" + (announcement?.id ?? ""))
+        .help(language.localized(
+            chinese: "将这条预告标为人工确认完成，并从点击时刻重新计时；可在公告详情撤销",
+            english: "Complete this preview and restart its timer now. Undo in announcement details."))
+    }
+
     var body: some View {
-        Button(action: action) {
+        // Sibling buttons keep confirmation independent from opening history.
+        ZStack {
+            Button(action: action) {
+                Color.clear.contentShape(RoundedRectangle(cornerRadius: 11))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(accessibilityText)
+            .accessibilityIdentifier("reset-announcement-open-" + (announcement?.id ?? "empty"))
+            .help(language.localized(chinese: "查看公告详情；查看额度不会清除未读",
+                                     english: "View announcements; checking quota does not clear unread updates"))
+
             HStack(spacing: 10) {
                 Image(systemName: announcement != nil ? "clock.fill" : (unreadCount > 0 ? "bell.badge.fill" : "bell"))
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(highlighted ? Color.orange : Color.secondary)
                     .frame(width: 25)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 3) {
                     if let announcement {
-                        Text(title)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.orange)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        Text(ResetAnnouncementSummary.countdownText(for: announcement, now: now, language: language))
-                            .font(.system(size: ResetScheduleTiming.phase(for: announcement, now: now) == .afterDate ? 13 : 18,
-                                          weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(Color.orange)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                        if ResetScheduleTiming.phase(for: announcement, now: now) != .afterDate {
-                            Text(ResetAnnouncementSummary.scheduleText(for: announcement, now: now, language: language))
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(Color.white.opacity(0.9))
+                        Group {
+                            Text(title)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.orange)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
-                            if let beijingWeekday = ResetScheduleTiming.beijingWeekdayText(for: announcement, now: now, language: language) {
-                                Text(beijingWeekday)
+                            Text(ResetAnnouncementSummary.countdownText(for: announcement, now: now, language: language))
+                                .font(.system(size: ResetScheduleTiming.phase(for: announcement, now: now) == .afterDate ? 13 : 18,
+                                              weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.orange)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                        }
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                        if ResetScheduleTiming.phase(for: announcement, now: now) != .afterDate {
+                            HStack(spacing: 6) {
+                                Text(ResetAnnouncementSummary.scheduleText(for: announcement, now: now, language: language))
                                     .font(.system(size: 10.5, weight: .medium))
-                                    .foregroundStyle(Color.white.opacity(0.8))
+                                    .foregroundStyle(Color.white.opacity(0.9))
                                     .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                                if manualConfirmationAction != nil { confirmationButton }
                             }
-                            if let risk = ResetScheduleTiming.quotaRiskText(for: announcement, now: now, language: language) {
-                                Text(risk)
-                                    .font(.system(size: 9.5, weight: .semibold))
-                                    .foregroundStyle(Color.orange.opacity(0.9))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
+                            Group {
+                                if let beijingWeekday = ResetScheduleTiming.beijingWeekdayText(for: announcement, now: now, language: language) {
+                                    Text(beijingWeekday)
+                                        .font(.system(size: 10.5, weight: .medium))
+                                        .foregroundStyle(Color.white.opacity(0.8))
+                                        .lineLimit(1)
+                                }
+                                if let risk = ResetScheduleTiming.quotaRiskText(for: announcement, now: now, language: language) {
+                                    Text(risk)
+                                        .font(.system(size: 9.5, weight: .semibold))
+                                        .foregroundStyle(Color.orange.opacity(0.9))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                }
                             }
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                        } else if manualConfirmationAction != nil {
+                            confirmationButton
                         }
                         Text(ResetScheduleTiming.losAngelesNowText(now, language: language))
                             .font(.system(size: 10.5, weight: .medium, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(Color.white.opacity(0.9))
                             .lineLimit(1)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     } else {
                         Text(title.replacingOccurrences(of: "（", with: "\n（"))
                             .font(.system(size: 12, weight: .semibold))
@@ -343,43 +402,48 @@ struct ResetAnnouncementEntryView: View {
                             .foregroundStyle(didResetToday ? Color.green : Color.white)
                             .lineLimit(2)
                             .minimumScaleFactor(0.85)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
-                    if announcement == nil && unreadCount > 0 {
-                        Text(awayUnreadCount > 0
-                            ? language.localized(chinese: "离开期间有 \(awayUnreadCount) 条更新 · 点击查看", english: "\(awayUnreadCount) updates while away · View history")
-                            : language.localized(chinese: "\(unreadCount) 条未读动态 · 点击查看", english: "\(unreadCount) unread updates · View history"))
-                            .font(.system(size: 9.5))
-                            .foregroundStyle(Color.orange)
-                            .lineLimit(1)
+                    Group {
+                        if announcement == nil && unreadCount > 0 {
+                            Text(awayUnreadCount > 0
+                                ? language.localized(chinese: "离开期间有 \(awayUnreadCount) 条更新 · 点击查看", english: "\(awayUnreadCount) updates while away · View history")
+                                : language.localized(chinese: "\(unreadCount) 条未读动态 · 点击查看", english: "\(unreadCount) unread updates · View history"))
+                                .font(.system(size: 9.5))
+                                .foregroundStyle(Color.orange)
+                                .lineLimit(1)
+                        }
+                        Text(statusText)
+                            .font(.system(size: announcement == nil ? 10.5 : 9.5))
+                            .foregroundStyle(Color.white.opacity(0.65))
+                            .lineLimit(announcement == nil ? 2 : 1)
+                            .minimumScaleFactor(0.8)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text(statusText)
-                        .font(.system(size: announcement == nil ? 10.5 : 9.5))
-                        .foregroundStyle(Color.white.opacity(0.65))
-                        .lineLimit(announcement == nil ? 2 : 1)
-                        .minimumScaleFactor(0.8)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
                 .layoutPriority(1)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.45))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity,
-                   minHeight: announcement == nil ? Self.emptyHeight : Self.announcementHeight,
-                   maxHeight: announcement == nil ? Self.emptyHeight : Self.announcementHeight)
-            .background(highlighted ? Color.orange.opacity(0.12) : Color.white.opacity(0.055))
-            .clipShape(RoundedRectangle(cornerRadius: 11))
-            .overlay {
-                RoundedRectangle(cornerRadius: 11)
-                    .stroke(highlighted ? Color.orange.opacity(0.35) : Color.white.opacity(0.1), lineWidth: 0.5)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 11))
         }
-        .buttonStyle(.plain)
-        .help(language.localized(chinese: "查看公告详情；查看额度不会清除未读", english: "View announcements; checking quota does not clear unread updates"))
-        .accessibilityLabel(accessibilityText)
+        .frame(maxWidth: .infinity,
+               minHeight: announcement == nil ? Self.emptyHeight : Self.announcementHeight,
+               maxHeight: announcement == nil ? Self.emptyHeight : Self.announcementHeight)
+        .background(highlighted ? Color.orange.opacity(0.12) : Color.white.opacity(0.055))
+        .clipShape(RoundedRectangle(cornerRadius: 11))
+        .overlay {
+            RoundedRectangle(cornerRadius: 11)
+                .stroke(highlighted ? Color.orange.opacity(0.35) : Color.white.opacity(0.1), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        }
     }
 }
