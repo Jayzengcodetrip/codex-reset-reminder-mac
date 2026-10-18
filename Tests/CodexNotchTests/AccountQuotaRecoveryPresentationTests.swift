@@ -81,7 +81,7 @@ final class AccountQuotaRecoveryPresentationTests: XCTestCase {
         XCTAssertEqual(result.unconfirmedAccountRecovery, unknown)
         XCTAssertEqual(ResetAnnouncementEntriesView.unconfirmedHeading(language: .chinese),
                        "本账户额度已恢复 · 方式待确认")
-        XCTAssertEqual(ResetAnnouncementEntriesView.height(for: result), 180)
+        XCTAssertEqual(ResetAnnouncementEntriesView.height(for: result), 136)
         XCTAssertEqual(ResetAnnouncementEntriesView.height(timedCount: 2, hasUndated: true,
             hasDelivery: true, hasUnconfirmed: true), ResetAnnouncementEntriesView.maximumHeight)
     }
