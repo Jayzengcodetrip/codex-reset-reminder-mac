@@ -69,6 +69,7 @@ final class NotchRuntimeCoordinator {
 
     var onOpenResetAnnouncements: (() -> Void)?
     var onConfirmResetManually: ((String) -> Void)?
+    var onRestartResetTimerManually: (() -> Void)?
     var onOpenUndatedAnnouncements: (() -> Void)?
     var onAccountResetReceiptChange: ((AccountResetReceipt?) -> Void)?
 
@@ -101,20 +102,21 @@ final class NotchRuntimeCoordinator {
         if changed && started { render() }
     }
 
-    func updateResetAnnouncements(unread: Int, awayUnread: Int, status: String, announcements: [ResetAnnouncement] = [], records: [ResetRecord] = []) {
-        let priorHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation)
+    func updateResetAnnouncements(unread: Int, awayUnread: Int, status: String, announcements: [ResetAnnouncement] = [], records: [ResetRecord] = [], manualTimerRestartedAt: Date? = nil) {
+        let priorHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount)
         viewModel.resetUnreadCount = unread
         viewModel.resetAwayUnreadCount = awayUnread
         viewModel.resetStatusText = status
         viewModel.resetPreannouncements = announcements
         viewModel.resetRecords = records
+        viewModel.manualTimerRestartedAt = manualTimerRestartedAt
         // Reconcile late official evidence without fabricating another quota sample.
         if let recovery = try? accountRecoveryCache.reconcilePublicCompletions(
             accountID: receiptAccountID, publicCompletions: publicQuotaCompletions, now: nowProvider()) {
             applyAccountQuotaRecovery(recovery)
         }
         viewModel.updateClock(now: nowProvider())
-        if started && priorHeight != ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation) { render() }
+        if started && priorHeight != ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount) { render() }
     }
 
     /// Open the existing card without changing the user's persistent visibility preference.
@@ -187,6 +189,10 @@ final class NotchRuntimeCoordinator {
         }
         viewModel.onConfirmResetManually = { [weak self] id in
             self?.onConfirmResetManually?(id)
+        }
+
+        viewModel.onRestartResetTimerManually = { [weak self] in
+            self?.onRestartResetTimerManually?()
         }
 
         viewModel.onOpenUndatedAnnouncements = { [weak self] in
@@ -287,9 +293,9 @@ final class NotchRuntimeCoordinator {
     }
 
     private func advanceClock(now: Date) {
-        let oldHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation)
+        let oldHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount)
         viewModel.updateClock(now: now)
-        let newHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation)
+        let newHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount)
         if oldHeight != newHeight { render(now: now) }
     }
 
@@ -719,11 +725,11 @@ final class NotchRuntimeCoordinator {
             quotaExpandedSize: quotaExpandedContentSize(
                 for: displayState,
                 isResetScheduleExpanded: isResetScheduleExpanded
-            ).addingResetAnnouncementEntry(presentation: viewModel.resetTopPresentation),
+            ).addingResetAnnouncementEntry(presentation: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount),
             expandedSize: expandedContentSize(
                 for: displayState,
                 isResetScheduleExpanded: isResetScheduleExpanded
-            ).addingResetAnnouncementEntry(presentation: viewModel.resetTopPresentation)
+            ).addingResetAnnouncementEntry(presentation: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount)
         )
         let targetFrame = layout.frame(for: displayState)
         // The controller allocates the final canvas before the SwiftUI state
@@ -863,7 +869,7 @@ final class NotchRuntimeCoordinator {
 }
 
 private extension NSSize {
-    func addingResetAnnouncementEntry(presentation: ResetTopPresentation) -> NSSize {
-        NSSize(width: width, height: height + ResetAnnouncementEntriesView.height(for: presentation) + 8)
+    func addingResetAnnouncementEntry(presentation: ResetTopPresentation, unreadCount: Int) -> NSSize {
+        NSSize(width: width, height: height + ResetAnnouncementEntriesView.height(for: presentation, unreadCount: unreadCount) + 8)
     }
 }

@@ -16,6 +16,7 @@ struct ResetAnnouncementEntriesView: View {
     let action: () -> Void
     var undatedAction: () -> Void = {}
     var confirmAction: (String) -> Void = { _ in }
+    var restartTimerAction: () -> Void = {}
 
     static let summaryHeight: CGFloat = 120
     static let deliveryHeight: CGFloat = 30
@@ -23,7 +24,7 @@ struct ResetAnnouncementEntriesView: View {
     static let maximumHeight: CGFloat = 284
 
     static func deliveryFooterHeight(origin: ResetDeliveryOrigin?) -> CGFloat {
-        origin == .manualConfirmation ? 16 : deliveryHeight
+        origin == .manualConfirmation || origin == .manualTimerRestart ? 16 : deliveryHeight
     }
 
     // Retained for existing callers that only have timed countdowns.
@@ -33,21 +34,25 @@ struct ResetAnnouncementEntriesView: View {
         return CGFloat(visibleCount) * entryHeight + CGFloat(visibleCount - 1) * 8
     }
 
-    static func height(for presentation: ResetTopPresentation) -> CGFloat {
+    static func height(for presentation: ResetTopPresentation, unreadCount: Int = 0) -> CGFloat {
         height(timedCount: presentation.announcements.count,
                hasUndated: !presentation.undatedAnnouncements.isEmpty,
                hasDelivery: presentation.secondsSinceLastDelivery != nil,
                hasUnconfirmed: presentation.unconfirmedAccountRecovery != nil,
-               deliveryOrigin: presentation.latestDeliveryOrigin)
+               deliveryOrigin: presentation.latestDeliveryOrigin,
+               emptyCardHeight: ResetAnnouncementEntryView.emptyCardHeight(
+                   unreadCount: unreadCount, didResetToday: presentation.didResetToday,
+                   origin: presentation.latestDeliveryOrigin))
     }
 
     static func height(timedCount: Int, hasUndated: Bool, hasDelivery: Bool,
                        hasUnconfirmed: Bool = false,
-                       deliveryOrigin: ResetDeliveryOrigin? = nil) -> CGFloat {
-        let footer = (hasDelivery ? deliveryFooterHeight(origin: deliveryOrigin) + sectionSpacing : 0)
+                       deliveryOrigin: ResetDeliveryOrigin? = nil,
+                       emptyCardHeight: CGFloat = ResetAnnouncementEntryView.emptyHeight) -> CGFloat {
+        let footer = (hasDelivery ? deliveryFooterHeight(origin: deliveryOrigin) : 16) + sectionSpacing
             + (hasUnconfirmed ? deliveryHeight + sectionSpacing : 0)
         guard timedCount > 0 || hasUndated else {
-            return ResetAnnouncementEntryView.emptyHeight + footer
+            return emptyCardHeight + footer
         }
         let count = timedCount + (hasUndated ? 1 : 0)
         let cards = CGFloat(timedCount) * ResetAnnouncementEntryView.announcementHeight
@@ -59,14 +64,18 @@ struct ResetAnnouncementEntriesView: View {
     private var height: CGFloat {
         Self.height(timedCount: announcements.count, hasUndated: !undatedAnnouncements.isEmpty,
                     hasDelivery: secondsSinceLastDelivery != nil, hasUnconfirmed: unconfirmedRecovery != nil,
-                    deliveryOrigin: latestDeliveryOrigin)
+                    deliveryOrigin: latestDeliveryOrigin, emptyCardHeight: emptyCardHeight)
     }
     private var footerHeight: CGFloat {
-        (secondsSinceLastDelivery != nil ? Self.deliveryFooterHeight(origin: latestDeliveryOrigin) + Self.sectionSpacing : 0)
+        (secondsSinceLastDelivery != nil ? Self.deliveryFooterHeight(origin: latestDeliveryOrigin) : 16) + Self.sectionSpacing
             + (unconfirmedRecovery != nil ? Self.deliveryHeight + Self.sectionSpacing : 0)
     }
+    private var emptyCardHeight: CGFloat {
+        ResetAnnouncementEntryView.emptyCardHeight(unreadCount: unreadCount, didResetToday: didResetToday,
+                                                  origin: latestDeliveryOrigin)
+    }
     private var contentHeight: CGFloat {
-        guard hasActive else { return ResetAnnouncementEntryView.emptyHeight }
+        guard hasActive else { return emptyCardHeight }
         let count = announcements.count + (undatedAnnouncements.isEmpty ? 0 : 1)
         return CGFloat(announcements.count) * ResetAnnouncementEntryView.announcementHeight
             + (undatedAnnouncements.isEmpty ? 0 : Self.summaryHeight) + CGFloat(max(0, count - 1)) * 8
@@ -85,11 +94,17 @@ struct ResetAnnouncementEntriesView: View {
             .frame(height: height - footerHeight)
             if let seconds = secondsSinceLastDelivery {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(Self.deliveryAgeHeading(origin: latestDeliveryOrigin, language: language)
-                         + ResetTopPresentation.elapsedText(seconds: seconds, language: language))
-                        .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(Color.mint)
+                    HStack(spacing: 6) {
+                        Text(Self.deliveryAgeHeading(origin: latestDeliveryOrigin, language: language)
+                             + ResetTopPresentation.elapsedText(seconds: seconds, language: language))
+                            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.mint)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                        restartTimerButton
+                        Spacer(minLength: 0)
+                    }
                     let footnote = Self.deliveryFootnote(origin: latestDeliveryOrigin, language: language)
                     if !footnote.isEmpty {
                         Text(footnote)
@@ -102,6 +117,16 @@ struct ResetAnnouncementEntriesView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 4)
                 .frame(height: Self.deliveryFooterHeight(origin: latestDeliveryOrigin))
+            } else {
+                HStack(spacing: 6) {
+                    Text(language.localized(chinese: "尚未记录重置时间", english: "No reset time recorded"))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                    restartTimerButton
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 4)
+                .frame(height: 16)
             }
             if let recovery = unconfirmedRecovery {
                 VStack(alignment: .leading, spacing: 2) {
@@ -123,6 +148,23 @@ struct ResetAnnouncementEntriesView: View {
         .frame(height: height)
     }
 
+    private var restartTimerButton: some View {
+        Button(action: restartTimerAction) {
+            Label(language.localized(chinese: "重新计时", english: "Restart timer"), systemImage: "arrow.counterclockwise")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.7))
+                .padding(.horizontal, 5)
+                .frame(height: 16)
+                .background(Color.white.opacity(0.09), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityIdentifier("manual-reset-timer-restart")
+        .help(language.localized(chinese: "已确认额度重置？点击后从现在重新计时，无需预告。不会使用重置券。",
+                                 english: "Quota reset confirmed? Restart this clock from now, even without an announcement. No reset credits are used."))
+    }
+
     static func unconfirmedHeading(language: AppLanguage) -> String {
         language.localized(chinese: "本账户额度已恢复 · 方式待确认", english: "Account quota recovered · Cause unconfirmed")
     }
@@ -136,7 +178,7 @@ struct ResetAnnouncementEntriesView: View {
     }
 
     static func deliveryFootnote(origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
-        if origin == .manualConfirmation {
+        if origin == .manualConfirmation || origin == .manualTimerRestart {
             return ""
         }
         if case let .accountRecovery(kind) = origin {
@@ -246,7 +288,14 @@ struct ResetAnnouncementEntriesView: View {
 
 /// A stable-height entry keeps announcement updates from moving the quota card.
 struct ResetAnnouncementEntryView: View {
-    static let emptyHeight: CGFloat = 64
+    static let emptyHeight: CGFloat = 48
+
+    static func emptyCardHeight(unreadCount: Int, didResetToday: Bool, origin: ResetDeliveryOrigin?) -> CGFloat {
+        // Keep ordinary two-line content compact, reserving only the rows that
+        // actually exist for unread updates and a public same-day delivery.
+        let publicToday = didResetToday && (origin == nil || origin == .publicAnnouncement)
+        return emptyHeight + (unreadCount > 0 ? 14 : 0) + (publicToday ? 16 : 0)
+    }
     static let announcementHeight: CGFloat = 138
 
     let unreadCount: Int
@@ -265,7 +314,7 @@ struct ResetAnnouncementEntryView: View {
         if case .accountRecovery = origin {
             return language.localized(chinese: "暂无最新重置预告", english: "No new reset announcements")
         }
-        if origin == .accountReceipt || origin == .manualConfirmation {
+        if origin == .accountReceipt || origin == .manualConfirmation || origin == .manualTimerRestart {
             return language.localized(chinese: "暂无最新重置预告",
                                       english: "No new reset announcements")
         }
@@ -447,8 +496,8 @@ struct ResetAnnouncementEntryView: View {
             .padding(.horizontal, 12)
         }
         .frame(maxWidth: .infinity,
-               minHeight: announcement == nil ? Self.emptyHeight : Self.announcementHeight,
-               maxHeight: announcement == nil ? Self.emptyHeight : Self.announcementHeight)
+               minHeight: announcement == nil ? Self.emptyCardHeight(unreadCount: unreadCount, didResetToday: didResetToday, origin: latestDeliveryOrigin) : Self.announcementHeight,
+               maxHeight: announcement == nil ? Self.emptyCardHeight(unreadCount: unreadCount, didResetToday: didResetToday, origin: latestDeliveryOrigin) : Self.announcementHeight)
         .background(highlighted ? Color.orange.opacity(0.12) : Color.white.opacity(0.055))
         .clipShape(RoundedRectangle(cornerRadius: 11))
         .overlay {

@@ -14,7 +14,8 @@ struct ResetTopPresentation: Equatable {
 
     static func make(pending: [ResetAnnouncement], records: [ResetRecord], now: Date,
                      accountReceipt: AccountResetReceipt? = nil,
-                     accountRecovery: AccountQuotaRecoveryState? = nil) -> Self {
+                     accountRecovery: AccountQuotaRecoveryState? = nil,
+                     manualTimerRestartedAt: Date? = nil) -> Self {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = ResetScheduleTiming.losAngeles
         let receipt = accountReceipt.flatMap {
@@ -25,6 +26,10 @@ struct ResetTopPresentation: Equatable {
             return time.timeIntervalSince1970.isFinite && time.timeIntervalSince1970 > 0 && time <= now
         }
         let latestManual = manualRecords.compactMap(\.manualCompletedAt).max()
+        let timerRestart = manualTimerRestartedAt.flatMap { time in
+            time.timeIntervalSince1970.isFinite && time.timeIntervalSince1970 > 0 && time <= now
+                ? time : nil
+        }
         func manuallyConfirmedEvent(_ announcement: ResetAnnouncement) -> Bool {
             manualRecords.contains { record in
                 if ResetPendingAnnouncements.sameIdentity(record.announcement, announcement) { return true }
@@ -122,10 +127,15 @@ struct ResetTopPresentation: Equatable {
             latestDelivery = latestManual
             origin = .manualConfirmation
         }
+        if let timerRestart, timerRestart >= (latestDelivery ?? .distantPast) {
+            latestDelivery = timerRestart
+            origin = .manualTimerRestart
+        }
+        let latestLocalManualTime = [latestManual, timerRestart].compactMap { $0 }.max()
         let unconfirmed = accountRecovery?.latestUnconfirmed.flatMap { recovery in
             recovery.detectedAt <= now && recovery.confirmedAt <= now
                 && recovery.detectedAt > (accountRecovery?.latestConfirmed?.detectedAt ?? .distantPast)
-                && recovery.detectedAt > (latestManual ?? .distantPast)
+                && recovery.detectedAt > (latestLocalManualTime ?? .distantPast)
                 ? recovery : nil
         }
         return Self(announcements: visible,
@@ -137,7 +147,7 @@ struct ResetTopPresentation: Equatable {
     }
 
     func emptyText(language: AppLanguage) -> String {
-        if latestDeliveryOrigin == .manualConfirmation {
+        if latestDeliveryOrigin == .manualConfirmation || latestDeliveryOrigin == .manualTimerRestart {
             return language.localized(chinese: "暂无最新重置预告", english: "No new reset announcements")
         }
         if case .accountRecovery = latestDeliveryOrigin {

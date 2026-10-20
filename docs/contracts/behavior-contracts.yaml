@@ -2315,3 +2315,34 @@ contracts:
     supersedes: []
     superseded_by: null
     last_verified_commit: null
+
+  - id: RESET-STANDALONE-TIMER-001
+    title: Manual elapsed timer can restart without a preview
+    status: active
+    statement: >-
+      Restart timer persists an optional manualTimerRestartedAt before changing
+      the home clock. Repeated explicit clicks restart it again. No public
+      record, preview state, unread flag, notification or account quota changes.
+      Old ledgers load without the field; refresh and relaunch retain it. Reject
+      invalid dates and ignore future anchors. Earlier evidence cannot move the
+      clock backward; a newer independent delivery can advance it. Keep the
+      restart control available when no previous delivery exists and omit its
+      provenance footnote from the small home panel.
+    rationale: A surprise reset has no preview on which to use Confirm reset.
+    source: user-request
+    owner: local-customization
+    risk: medium
+    scope:
+      include: [elapsed-timer, local-persistence, expanded-controls]
+      exclude: [preview-recognition, account-reset, credit-redemption, notification-policy]
+    examples:
+      positive: A click with no preview starts at zero, survives a restart and a stale feed, and leaves other previews unchanged.
+      negative: A failed save resets the visible clock or an old feed overwrites the click timestamp.
+    guards:
+      - Tests/CodexNotchTests/ResetManualTimerRestartTests.swift
+      - Tests/CodexNotchTests/ResetManualTimerRestartMonitorTests.swift
+      - Tests/CodexNotchTests/CompactExpandedLayoutTests.swift
+      - "manual: verify the restart button in an isolated native production-view harness; preserve the real installed timer during upgrade"
+    supersedes: []
+    superseded_by: null
+    last_verified_commit: null

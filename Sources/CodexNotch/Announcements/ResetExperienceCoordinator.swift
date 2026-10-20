@@ -87,7 +87,7 @@ enum ResetNotificationText {
 final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelegate {
     let monitor: ResetMonitor
     private let announcementNavigation = ResetAnnouncementsNavigation()
-    var onStatusChange: ((Int, Int, String, [ResetAnnouncement], [ResetRecord]) -> Void)?
+    var onStatusChange: ((Int, Int, String, [ResetAnnouncement], [ResetRecord], Date?) -> Void)?
     var onShowSummary: (() -> Void)?
     private let notificationCenter = UNUserNotificationCenter.current()
     private var detailWindow: NSWindow?
@@ -191,7 +191,7 @@ final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelega
             language: AppLanguage.fromStoredValue(UserDefaults.standard.string(forKey: AppLanguage.storageKey)),
             hasNewPreannouncement: monitor.hasNewPreannouncement
         )
-        onStatusChange?(monitor.unreadCount, monitor.awayUnreadCount, status, pending, monitor.records)
+        onStatusChange?(monitor.unreadCount, monitor.awayUnreadCount, status, pending, monitor.records, monitor.manualTimerRestartedAt)
     }
 
     private func notify(_ records: [ResetRecord]) {

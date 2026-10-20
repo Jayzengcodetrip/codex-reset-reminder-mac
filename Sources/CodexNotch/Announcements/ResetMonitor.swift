@@ -12,6 +12,7 @@ final class ResetMonitor: ObservableObject {
     @Published private(set) var sourceIsFresh = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var manualConfirmationErrorMessage: String?
+    @Published private(set) var manualTimerRestartedAt: Date?
     @Published private(set) var hasNewPreannouncement = false
     var unreadCount: Int { records.filter(\.isUnread).count }
     var awayUnreadCount: Int { records.filter { $0.isUnread && $0.occurredWhileAway }.count }
@@ -199,7 +200,8 @@ final class ResetMonitor: ObservableObject {
         }
         var candidate = ledger
         guard candidate.confirmResetManually(id: id, at: now()) else { return false }
-        return saveManualConfirmation(candidate, undo: false)
+        return saveLocalManualChange(candidate,
+            failureMessage: "人工确认未能保存，预告和重置计时未改变。请稍后重试。")
     }
 
     @discardableResult
@@ -207,14 +209,34 @@ final class ResetMonitor: ObservableObject {
         guard !storageLoadFailed else { return false }
         var candidate = ledger
         guard candidate.undoManualResetConfirmation(id: id) else { return false }
-        return saveManualConfirmation(candidate, undo: true)
+        return saveLocalManualChange(candidate,
+            failureMessage: "撤销未能保存，仍保留原来的人工确认。请稍后重试。")
+    }
+
+    /// Restart only the elapsed timer. This is not an announcement completion
+    /// and does not redeem a credit or otherwise change account usage.
+    @discardableResult
+    func restartResetTimerManually() -> Bool {
+        guard !storageLoadFailed else {
+            manualConfirmationErrorMessage = "无法读取本地公告记录，重新计时未保存。请重新打开应用后重试。"
+            onChange?()
+            return false
+        }
+        var candidate = ledger
+        guard candidate.restartResetTimerManually(at: now()) else {
+            manualConfirmationErrorMessage = "当前时间无效，重置计时未改变。请检查系统时间后重试。"
+            onChange?()
+            return false
+        }
+        return saveLocalManualChange(candidate,
+            failureMessage: "重新计时未能保存，仍保留原来的重置计时。请稍后重试。")
     }
 
     func clearManualConfirmationError() {
         manualConfirmationErrorMessage = nil
     }
 
-    private func saveManualConfirmation(_ candidate: ResetLedger, undo: Bool) -> Bool {
+    private func saveLocalManualChange(_ candidate: ResetLedger, failureMessage: String) -> Bool {
         do {
             // No suspension occurs between copying the latest ledger, atomic
             // persistence and publishing. A response in flight ingests into the
@@ -225,9 +247,7 @@ final class ResetMonitor: ObservableObject {
             publishLedger()
             return true
         } catch {
-            manualConfirmationErrorMessage = undo
-                ? "撤销未能保存，仍保留原来的人工确认。请稍后重试。"
-                : "人工确认未能保存，预告和重置计时未改变。请稍后重试。"
+            manualConfirmationErrorMessage = failureMessage
             onChange?()
             return false
         }
@@ -259,6 +279,7 @@ final class ResetMonitor: ObservableObject {
 
     private func publishLedger() {
         records = ledger.records
+        manualTimerRestartedAt = ledger.manualTimerRestartedAt
         lastSuccessfulCheck = ledger.lastSuccessfulCheck
         sourceCheckedAt = ledger.sourceCheckedAt
         sourceIsFresh = ledger.sourceIsFresh && ledger.sourceCheckedAt.map { now().timeIntervalSince($0) <= 45 * 60 } == true

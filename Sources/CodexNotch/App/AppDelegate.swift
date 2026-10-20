@@ -85,9 +85,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeCoordinator?.start()
         let experience = ResetExperienceCoordinator()
         resetExperience = experience
-        experience.onStatusChange = { [weak self] unread, away, status, announcements, records in
+        experience.onStatusChange = { [weak self] unread, away, status, announcements, records, manualTimerRestartedAt in
             self?.runtimeCoordinator?.updateResetAnnouncements(
-                unread: unread, awayUnread: away, status: status, announcements: announcements, records: records
+                unread: unread, awayUnread: away, status: status, announcements: announcements, records: records,
+                manualTimerRestartedAt: manualTimerRestartedAt
             )
         }
         runtimeCoordinator?.onOpenResetAnnouncements = { [weak experience] in
@@ -96,6 +97,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeCoordinator?.onConfirmResetManually = { [weak experience] id in
             guard let experience else { return }
             if !experience.monitor.confirmResetManually(id: id),
+               experience.monitor.manualConfirmationErrorMessage != nil {
+                experience.showAnnouncements()
+            }
+        }
+        runtimeCoordinator?.onRestartResetTimerManually = { [weak experience] in
+            guard let experience else { return }
+            if !experience.monitor.restartResetTimerManually(),
                experience.monitor.manualConfirmationErrorMessage != nil {
                 experience.showAnnouncements()
             }

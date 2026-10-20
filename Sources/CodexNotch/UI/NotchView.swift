@@ -16,16 +16,19 @@ final class NotchViewModel: ObservableObject {
     @Published var resetStatusText = "正在检查重置公告…"
     @Published var resetPreannouncements: [ResetAnnouncement] = []
     @Published var resetRecords: [ResetRecord] = []
+    @Published var manualTimerRestartedAt: Date?
     @Published var accountResetReceipt: AccountResetReceipt?
     @Published var accountQuotaRecovery = AccountQuotaRecoveryState()
     var resetTopPresentation: ResetTopPresentation {
         ResetTopPresentation.make(pending: resetPreannouncements, records: resetRecords, now: now,
-                                  accountReceipt: accountResetReceipt, accountRecovery: accountQuotaRecovery)
+                                  accountReceipt: accountResetReceipt, accountRecovery: accountQuotaRecovery,
+                                  manualTimerRestartedAt: manualTimerRestartedAt)
     }
 
     var onOpenResetAnnouncements: () -> Void = {}
     var onOpenUndatedAnnouncements: () -> Void = {}
     var onConfirmResetManually: (String) -> Void = { _ in }
+    var onRestartResetTimerManually: () -> Void = {}
 
     var onOpenThread: (String) -> Void
     var onActivateChatGPT: () -> Void
@@ -77,7 +80,7 @@ final class NotchViewModel: ObservableObject {
         isResetScheduleExpanded: Bool = false,
         animationsEnabled: Bool = AppAnimationPreference.defaultEnabled
     ) {
-        let resolvedNow = Self.secondPrecision(now)
+        let resolvedNow = resolvedClock(now)
         let changesModel = self.state != state
             || self.now != resolvedNow
             || self.layoutMode != layoutMode
@@ -138,7 +141,7 @@ final class NotchViewModel: ObservableObject {
     }
 
     func updateClock(now: Date) {
-        let resolvedNow = Self.secondPrecision(now)
+        let resolvedNow = resolvedClock(now)
         guard self.now != resolvedNow else { return }
         self.now = resolvedNow
     }
@@ -146,6 +149,17 @@ final class NotchViewModel: ObservableObject {
     private static func isExpanded(_ state: NotchPresentationState) -> Bool {
         if case .expanded = state { return true }
         return false
+    }
+
+    private func resolvedClock(_ date: Date) -> Date {
+        let second = Self.secondPrecision(date)
+        // A just-saved click can fall after this second's floor. Render it
+        // immediately without rounding the persisted anchor or accepting a
+        // future timestamp; normal ticks still publish at second precision.
+        if let clickedAt = manualTimerRestartedAt, clickedAt > second, clickedAt <= date {
+            return date
+        }
+        return second
     }
 
     private static func secondPrecision(_ date: Date) -> Date {
@@ -341,6 +355,7 @@ struct NotchView: View {
                     onOpenResetAnnouncements: model.onOpenResetAnnouncements,
                     onOpenUndatedAnnouncements: model.onOpenUndatedAnnouncements,
                     onConfirmResetManually: model.onConfirmResetManually,
+                    onRestartResetTimerManually: model.onRestartResetTimerManually,
                     onActivateChatGPT: model.onActivateChatGPT,
                     onOpenThread: model.onOpenThread,
                     onResetScheduleExpandedChanged: model.onResetScheduleExpandedChanged,
@@ -1397,6 +1412,7 @@ private struct ExpandedNotchView: View {
     let onOpenResetAnnouncements: () -> Void
     let onOpenUndatedAnnouncements: () -> Void
     let onConfirmResetManually: (String) -> Void
+    let onRestartResetTimerManually: () -> Void
     let onActivateChatGPT: () -> Void
     let onOpenThread: (String) -> Void
     let onResetScheduleExpandedChanged: (Bool) -> Void
@@ -1444,7 +1460,8 @@ private struct ExpandedNotchView: View {
                 unconfirmedRecovery: resetUnconfirmedRecovery,
                 action: onOpenResetAnnouncements,
                 undatedAction: onOpenUndatedAnnouncements,
-                confirmAction: onConfirmResetManually
+                confirmAction: onConfirmResetManually,
+                restartTimerAction: onRestartResetTimerManually
             )
             .padding(.bottom, 8)
 

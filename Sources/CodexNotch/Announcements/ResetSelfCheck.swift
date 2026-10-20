@@ -222,7 +222,7 @@ enum ResetSelfCheck {
                   "Mixed notification batch must prioritize the latest changed pending preannouncement")
         try check(ResetNotificationText.announcement(from: secondChanges, now: now, pending: simultaneousPending)?.id == "second",
                   "The new second preannouncement must be notified without replacing the first")
-        try check(ResetAnnouncementEntriesView.height(for: 0) == 64 && ResetAnnouncementEntriesView.height(for: 1) == 138,
+        try check(ResetAnnouncementEntriesView.height(for: 0) == 48 && ResetAnnouncementEntriesView.height(for: 1) == 138,
                   "An active announcement must reserve room for its live Los Angeles clock")
         try check(ResetAnnouncementEntriesView.height(for: 2) == 284 && ResetAnnouncementEntriesView.height(for: 5) == 284,
                   "Two countdowns fit above quota and further countdowns scroll within bounded height")

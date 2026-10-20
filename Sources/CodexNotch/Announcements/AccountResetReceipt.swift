@@ -13,4 +13,5 @@ enum ResetDeliveryOrigin: Equatable, Sendable {
     case accountReceipt
     case accountRecovery(AccountQuotaRecoveryKind)
     case manualConfirmation
+    case manualTimerRestart
 }

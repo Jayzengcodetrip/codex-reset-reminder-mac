@@ -20,6 +20,21 @@ final class CompactExpandedLayoutTests: XCTestCase {
             language: .chinese).isEmpty)
     }
 
+    func testEmptyStateReservesOnlyVisibleRowsAndKeepsRestartAvailableWithoutEvidence() async {
+        let plain = ResetTopPresentation(announcements: [], didResetToday: false)
+        let withUnread = ResetAnnouncementEntriesView.height(for: plain, unreadCount: 2)
+        XCTAssertEqual(withUnread - ResetAnnouncementEntriesView.height(for: plain), 14)
+        XCTAssertEqual(ResetAnnouncementEntryView.emptyHeight, 48)
+        XCTAssertGreaterThan(ResetAnnouncementEntriesView.height(for: plain), ResetAnnouncementEntryView.emptyHeight)
+        let restarted = ResetTopPresentation.make(pending: [], records: [], now: Date(timeIntervalSince1970: 1_800_000_030),
+            manualTimerRestartedAt: Date(timeIntervalSince1970: 1_800_000_000))
+        XCTAssertEqual(ResetAnnouncementEntriesView.height(for: restarted), ResetAnnouncementEntriesView.height(for: plain))
+        XCTAssertEqual(restarted.secondsSinceLastDelivery, 30)
+        XCTAssertTrue(ResetAnnouncementEntriesView.deliveryFootnote(origin: .manualTimerRestart, language: .chinese).isEmpty)
+        XCTAssertEqual(ResetAnnouncementEntryView.emptyHeadline(didResetToday: true, origin: .manualTimerRestart,
+            language: .chinese), "暂无最新重置预告")
+    }
+
     func testDatedPreviewsKeepTheirReadableRowsWhileExtraPreviewsScroll() async {
         let two = ResetAnnouncementEntriesView.height(timedCount: 2, hasUndated: false, hasDelivery: false)
         XCTAssertGreaterThanOrEqual(two, ResetAnnouncementEntryView.announcementHeight * 2)

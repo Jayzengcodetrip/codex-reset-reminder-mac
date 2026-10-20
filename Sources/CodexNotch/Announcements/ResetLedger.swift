@@ -6,6 +6,9 @@ struct ResetLedger: Codable, Equatable {
     var baselineCompleted = false
     /// Optional for schema-one ledgers created before auxiliary delivery sources existed.
     var deliveryEvidenceBaselineCompleted: Bool? = nil
+    /// A local elapsed-clock anchor, independent of every announcement's status.
+    /// Optional so existing schema-one ledgers continue to decode unchanged.
+    var manualTimerRestartedAt: Date? = nil
     var records: [ResetRecord] = []
     var versions: [String: [ResetAnnouncement]] = [:]
     var lastSuccessfulCheck: Date?
@@ -129,6 +132,15 @@ struct ResetLedger: Codable, Equatable {
         for index in records.indices where matching.contains(records[index].id) {
             records[index].manualCompletedAt = nil
         }
+        return true
+    }
+
+    /// Every explicit click starts a new local clock; it does not confirm or
+    /// archive an announcement and never changes public evidence or read state.
+    @discardableResult
+    mutating func restartResetTimerManually(at time: Date) -> Bool {
+        guard time.timeIntervalSince1970.isFinite, time.timeIntervalSince1970 > 0 else { return false }
+        manualTimerRestartedAt = time
         return true
     }
 
