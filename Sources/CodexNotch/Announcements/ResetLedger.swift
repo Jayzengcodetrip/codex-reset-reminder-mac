@@ -194,6 +194,19 @@ struct ResetLedger: Codable, Equatable {
         sortByPublicationDate()
     }
 
+    /// Acknowledge the current snapshot only. No completion, timing, source or
+    /// history fields change; subsequent feed revisions can become unread again.
+    @discardableResult
+    mutating func markAllRead() -> Bool {
+        var changed = false
+        for index in records.indices where records[index].isUnread || records[index].occurredWhileAway {
+            records[index].isUnread = false
+            records[index].occurredWhileAway = false
+            changed = true
+        }
+        return changed
+    }
+
     /// Unread/away have their own filters. The history must not make an older
     /// announcement look newer merely because its details were supplemented.
     mutating func sortByPublicationDate() {

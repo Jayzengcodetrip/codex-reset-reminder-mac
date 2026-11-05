@@ -27,6 +27,8 @@ Account quota recovery is an additional completion signal, separate from preview
 
 An older undated preview may leave the home summary after a later credible official delivery with compatible scope and reset type. Its unresolved history entry remains available and says “A later reset occurred · Link unconfirmed” (Chinese UI: “后续已有重置 · 本条关联未确认”). A later compatible credit grant to this account can also remove only that older undated preview from home; history instead shows “This account received a reset credit · Link unconfirmed” and its exact grant time, without inventing an official post link. Neither case declares the preview completed or matches it to a particular delivery. A newer preview remains visible, and an older post that later gains a date returns as an independent countdown. Relative phrases such as “tomorrow” in excerpts refer to the original post time, never the current check time. The bounded announcement area leaves the weekly quota, its reset clock and reset-credit expiry accessible.
 
+The Reset updates window includes **Mark all read** next to Refresh. It acknowledges all current updates across filters, preserves history and reset timers, and allows later new or materially changed updates to become unread again.
+
 ## Install
 
 1. Open [the Releases page](https://github.com/Jayzengcodetrip/codex-reset-reminder-mac/releases/latest) and download the `macOS-arm64` **DMG**, or the matching ZIP as an alternative.

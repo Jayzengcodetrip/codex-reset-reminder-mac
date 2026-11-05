@@ -5,7 +5,7 @@ enum ResetAnnouncementFilter: String, CaseIterable {
 }
 
 /// The coordinator keeps this state when a window is hidden or brought forward.
-/// Navigating to a list never acknowledges records; only opening a specific record does.
+/// Navigating to a list never acknowledges records; details or the explicit bulk action do.
 @MainActor
 final class ResetAnnouncementsNavigation: ObservableObject {
     @Published var filter = ResetAnnouncementFilter.all
@@ -48,7 +48,7 @@ final class ResetAnnouncementsNavigation: ObservableObject {
 }
 
 /// Merely opening this window deliberately leaves every unread record intact.
-/// A record is acknowledged only by selecting that record's details.
+/// Selecting details acknowledges one record; the explicit bulk action acknowledges all.
 struct ResetAnnouncementsView: View {
     @ObservedObject var monitor: ResetMonitor
     @ObservedObject var navigation: ResetAnnouncementsNavigation
@@ -128,14 +128,15 @@ struct ResetAnnouncementsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(.dark)
         .alert(label("操作未保存", "Unable to save"), isPresented: Binding(
-            get: { monitor.manualConfirmationErrorMessage != nil },
-            set: { if !$0 { monitor.clearManualConfirmationError() } }
+            get: { monitor.readStateErrorMessage != nil || monitor.manualConfirmationErrorMessage != nil },
+            set: { if !$0 { monitor.clearReadStateError(); monitor.clearManualConfirmationError() } }
         )) {
             Button(label("好", "OK"), role: .cancel) {
+                monitor.clearReadStateError()
                 monitor.clearManualConfirmationError()
             }
         } message: {
-            Text(monitor.manualConfirmationErrorMessage
+            Text(monitor.readStateErrorMessage ?? monitor.manualConfirmationErrorMessage
                  ?? label("本次操作未能保存，请稍后重试。", "This change could not be saved. Please try again."))
         }
     }
@@ -156,6 +157,15 @@ struct ResetAnnouncementsView: View {
             }
             Spacer(minLength: 8)
             if monitor.isChecking { ProgressView().controlSize(.small) }
+            Button {
+                monitor.markAllRead()
+            } label: {
+                Label(label("全部已读", "Mark all read"), systemImage: "checkmark.circle")
+            }
+            .disabled(!monitor.canMarkAllRead)
+            .accessibilityIdentifier("reset-announcements-mark-all-read")
+            .help(label("将所有现有重置动态标为已读，保留历史和计时；不受当前筛选影响",
+                        "Mark all existing reset updates as read, across every filter. Keep history and timers."))
             Button {
                 monitor.refresh()
             } label: {

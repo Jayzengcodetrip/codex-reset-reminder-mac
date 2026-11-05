@@ -2346,3 +2346,33 @@ contracts:
     supersedes: []
     superseded_by: null
     last_verified_commit: null
+
+  - id: RESET-MARK-ALL-READ-001
+    title: Explicit bulk acknowledgement persists before clearing indicators
+    status: active
+    statement: >-
+      Mark all read acknowledges every current ledger record across filters, clearing
+      unread and away flags only after the candidate ledger saves successfully.
+      Preserve history, completion, preview selection, timer anchors, source check
+      results and notification policy. Failed saves leave all visible flags unchanged
+      and report a local acknowledgement error separately. A repeated empty action
+      does not save again. New posts and material revisions after the action remain
+      eligible for unread state and the existing notification policy, including an
+      in-flight refresh. Opening the window alone never marks everything read.
+    rationale: Users need to acknowledge a backlog without opening each update.
+    source: user-request
+    owner: local-customization
+    risk: medium
+    scope:
+      include: [announcement-history, unread-state, local-persistence]
+      exclude: [preview-recognition, completion, account-reset, timer-calculation]
+    examples:
+      positive: Nine unread updates become read with one click and remain read after restart; the next new update is unread.
+      negative: Bulk acknowledgement deletes history, completes a preview or changes the elapsed clock.
+    guards:
+      - Tests/CodexNotchTests/ResetMarkAllReadTests.swift
+      - Sources/CodexNotch/Announcements/ResetReadStateSelfCheck.swift
+      - "manual: click the actual history view in an isolated native fixture; verify installed button and preserved real unread records"
+    supersedes: []
+    superseded_by: null
+    last_verified_commit: null

@@ -1,56 +1,174 @@
-# Project handoff for contributors and coding agents
+# Codex 重置提醒 — 项目说明（每次开工先读）
 
-## Purpose and provenance
+> 本文件是 Claude、Codex、Gemini 等 Agent 共用的**唯一项目说明书正本**。开工先读本文件和 `决策记录.md`；`CLAUDE.md`、`GEMINI.md` 只保留 `@AGENTS.md`。
+> 历史设计依据保存在 `docs/decisions/`，行为契约保存在 `docs/contracts/behavior-contracts.yaml`；它们是证据和检查清单，不是另一份交接说明。以后交接规则、代码地图和操作流程统一改本文件。
 
-This is the public source for Codex Reset Reminder, whose application bundle is still named `CodexNotch.app`. It extends [fengdwx/codex-notch](https://github.com/fengdwx/codex-notch) v0.1.16 under MIT. Preserve the original copyright and permission text in `LICENSE` and the attribution in `NOTICE.md`.
+## 1. 这是什么
 
-The product has three distinct data domains. Do not infer a temporary benefit reset from an account's ordinary weekly reset time or from reset-credit count.
+用户日常使用的 macOS 顶部悬浮小窗：查看 Codex 每周额度和重置时间、重置券数量和有效期、临时重置预告及重置后的经过时间。顶部悬停展开，支持隐藏，另有“重置动态”历史窗口。
 
-1. **Account quota and credit receipts**: local Codex credentials from `CODEX_HOME/auth.json` (default `~/.codex/auth.json`) are sent only to ChatGPT usage and reset-credit endpoints. A past, exact reset-credit `granted_at` is evidence that this account received a credit, not that it was redeemed or that every account received one. Cache that timestamp and optional title/description locally under a hash of the account ID, never a raw account ID or token.
-2. **Public temporary reset announcements**: unauthenticated GET requests to NextReset `/api/status` and `/api/resets`, Codex Resets `/api/v1/resets?limit=100`, and NextReset.org `/api/v1/events.json`; no Codex token, account ID, or private conversation content may be sent there.
-3. **Local activity**: Codex session files and the local state database support the task/status UI.
+应用包名保持 `CodexNotch.app`。这是在 [fengdwx/codex-notch](https://github.com/fengdwx/codex-notch) **v0.1.16** 上开发的独立派生版，采用 MIT 许可；必须保留 `LICENSE` 原版权与许可文本以及 `NOTICE.md` 署名。
 
-## Product behavior to preserve
+当前交付版本：**v0.2.14（构建 34）**，增加“全部已读”。版本元数据以 `Resources/Info.plist` 为准，安装和验证结果以 `版本报告/0.2.14 全部已读.md` 为准；写入文档不代表已经安装或通过实测。此前已完成本机交付；用户于 2026-11-05 明确要求将同一 v0.2.14 源码和安装包发布到 GitHub，按第 8 节执行。
 
-- Check the public source at launch and about every 120 seconds while the app runs; catch up after sleep, unlock, and network recovery. A failure must not be presented as a successful check.
-- First-run archive discovery establishes a quiet baseline. New or materially updated announcements during active use can produce a macOS notification; updates found while away remain visible and unread in the app.
-- Changes to provenance wording alone never reopen an announcement. More source text or a stronger completion label for the same known delivery is saved silently; changed delivery time/type/scope, new preview relations and cancellation remain meaningful. History is ordered by publication date, with separate unread/away filters.
-- Keep independent countdowns for every visible **dated** pending announcement. Date/weekday-only previews use America/Los_Angeles: count down to the announced day's midnight, then count down through that day until the next midnight. Both boundaries are estimates, not official times; never encourage exhausting quota solely on the estimate. Exact timestamps keep their deadline. Visible cards and pending details show live weekday + 24-hour HH:mm:ss without month/day; notification clocks are fixed snapshots. Beijing shows only the corresponding cutoff weekday.
-- Pending previews with no usable date have no invented countdown. Combine current undated previews into one small top summary with the newest original-post excerpt and its publication time; keep their separate history entries. If a later, credible, same-scope compatible official delivery exists, an older undated preview may leave the home summary only. Keep it unresolved in history with “后续已有重置 · 本条关联未确认” and a clear history entry point. A later compatible exact credit grant for this account may likewise remove only that older undated preview from home; history instead says “本账户已收到重置券 · 本条关联未确认” and shows the actual grant time. Neither path claims completion or a verified relation. A newer preview remains visible, and an older preview that later gains a usable date returns as its own countdown.
-- At the end of the announced LA day, hide an unfulfilled dated top card and show “暂无最新重置预告” only if no other dated or undated preview remains; retain the unresolved ledger history. Official started delivery counts: direct reset and banked reset both end the **associated** countdown. With no visible preview, show “暂无最新重置预告（今天已重置）” until the public delivery's LA day ends, or use the plain “暂无最新重置预告” headline when the latest signal is an exact account credit grant; identify the received credit once in the elapsed-time footer. Present elapsed time since the latest credible public delivery or this account's exact credit grant as a separate live signal, including when previews remain visible and on a same-day empty home card. Label the origin clearly: a public rollout is not proof of individual receipt, and an account credit grant requires manual redemption. Omit elapsed time without either timestamp. Never derive public delivery from an estimated deadline, a local check, a future `granted_at`, weekly quota or credit counts. A separately confirmed account quota recovery may update the elapsed clock with explicit personal provenance; its first observation time is not an exact server reset timestamp. Cancellation stays in history.
-- A short official completion reply is delivery evidence only when its single linked post resolves to a primary-verified, scheduled, type-compatible reset context. Resolve at most four strictly valid HTTPS t.co links anonymously with bounded HEAD requests; reject redirects outside the official thsottiaux post allowlist and never request the destination page. Missing links or context do not prove completion; preserve already saved evidence when an auxiliary request fails.
-- Prefer explicit announcement-to-delivery evidence. A fallback association may use only one compatible official **dated** preview on the same LA target date, excluding targeted compensation and conflicting types. Persist and explain inferred relations; do not silently rematch the same delivery. Hiding an older undated preview from home after a later compatible public delivery or account credit grant is a presentation decision, never an inferred association or ledger completion. An account grant must not invent an official post link, change read state, or trigger an announcement notification. Auxiliary feed failure must not erase evidence or replay notices. Preserve visible attribution links for all public sources.
-- The interface may say “已检查接口，暂无新重置预告” after a successful check even while earlier pending countdowns remain. Keep those countdowns visible.
-- Explicit manual confirmation is a separate local completion path. Save optional ResetRecord.manualCompletedAt for the selected original-post identity and aliases only; never rewrite official status, deliveryAt, unread state or evidence. Persist before publishing and surface save failure separately from feed status. Repeated confirmation is idempotent. Refresh, restart and late same-post aliases retain the original click time; same-event revisions are saved silently. Keep manual provenance in history; omit the manual-confirmation explanatory line below the home elapsed timer. Offer undo in history, then derive presentation from remaining official/account evidence. Do not actually redeem credits or reset usage. An explicitly related late official completion must not move the same manually confirmed event clock; independent later deliveries can still advance it.
-- The elapsed footer also offers an independent Restart timer action, including without any preview or prior reset evidence. Persist optional ledger.manualTimerRestartedAt before publishing; each explicit click starts again. This local anchor changes only elapsed presentation, never public records, preview completion/archival, unread state, notification state or account usage. Old schema-one ledgers remain readable. Ignore invalid/future anchors; older evidence cannot move this clock backward, independent newer evidence may advance it. Omit its home provenance footnote just like manual preview confirmation. Preserve this field during refresh and upgrades.
-- Keep weekly quota/reset and reset-credit expiry separate from the public announcement ledger. Source timestamps are not independent proof of completed execution.
-- Expanded content uses bounded row heights and fixed vertical gaps, with a shorter empty announcement and single-line manual elapsed footer. Keep the 420pt width, text sizes, compact geometry, full-card hit areas and top anchor; extra previews scroll and credit rows add only their required height. Do not reintroduce flexible vertical spacers or legacy blank canvas allowances.
-- The notch panel's hide/hover behavior and cross-application participation need actual macOS acceptance testing. Logic checks alone do not prove every window, full-screen app, wake, or startup case.
+## 2. 位置与数据
 
-## Account quota recovery detection
+| 对象 | 位置 |
+|---|---|
+| 项目根目录 | `/Users/macbookpro/Documents/Codex/2026-09-12/new-chat/work/codex-reset-reminder-mac` |
+| 开发源码 | `Sources/CodexNotch/` |
+| 本机正式应用 | `/Applications/CodexNotch.app` |
+| Bundle ID | `io.github.jayzengcodetrip.codexresetreminder`，不得随意改变 |
+| 构建输出 | `dist/`，不进 git；交付包复制到外部版本目录，文件名带版本号 |
+| 本轮交付目录 | `/Users/macbookpro/Documents/Codex/2026-09-12/new-chat/outputs/重置提醒-v0.2.14/` |
+| 正式公告账本 | `~/Documents/Codex/QuotaReminderState/announcements.json` |
+| 账户重置券到账缓存 | `~/Library/Application Support/CodexNotch/account-reset-receipts.json` |
+| 账户额度恢复缓存 | `~/Library/Application Support/CodexNotch/account-quota-recoveries.json` |
+| 版本报告 / 交接提示词 | `版本报告/` / `项目交接/` |
+| 既有公开仓库 | `https://github.com/Jayzengcodetrip/codex-reset-reminder-mac` |
 
-- Preserve public announcement parsing, preview selection, matching, read state and notification behavior. Account recovery must never complete, remove, or rewrite a preview or public ledger record.
-- Compare valid raw weekly quota samples under one hashed account identity, plan and window. First launch establishes a baseline; a nonzero used percentage becoming zero is a candidate and requires another valid later sample. Do not infer recovery from a rounded UI percentage or an arbitrary increase, and do not infer an exact reset time from the next deadline.
-- Distinguish redeemed reset-credit evidence, a crossed old weekly deadline, and a compatible official direct-reset completion. Unavailable/incomplete credit history, overlaps and ambiguous causes remain unconfirmed. Keep the last confirmed elapsed clock and show a compact pending-cause notice. Late evidence may resolve or correct the cause without moving the original detection time.
-- Store account recovery observations separately at `~/Library/Application Support/CodexNotch/account-quota-recoveries.json`, keyed by an account hash; never store account tokens or raw account IDs. A confirmed personal recovery updates the footer only and identifies manual credit, weekly reset, or recovery during an official temporary reset. Existing public-message and exact account-credit-grant clocks remain supported.
+`ResetExperienceCoordinator` 明确指定上面的正式公告账本路径。`ResetMonitor` 独立使用时的默认路径 `~/Library/Application Support/CodexNotch/reset-announcements.json` 是备用路径，**不能把它写成正式 App 的实际账本位置**。
 
-## Build and verification
+数据分成三个领域，不能混为一谈：
 
-This is a Swift 5.9 / SwiftUI and AppKit Swift Package for macOS 14+. Public release artifacts are currently Apple Silicon (`arm64`) DMG and ZIP, ad-hoc signed and not notarized.
+- **账户额度和重置券**：读取 `CODEX_HOME/auth.json`（默认 `~/.codex/auth.json`），凭证只发往 ChatGPT 的额度和重置券接口。过去、精确的 `granted_at` 说明本账户已获券，不说明已经用券，也不代表所有账户均已获券。缓存按账户哈希隔离，不存原始账户 ID 或令牌。
+- **公开预告和发放消息**：匿名 GET `https://nextreset.net/api/status`、`https://nextreset.net/api/resets`、`https://codex-resets.com/api/v1/resets?limit=100`、`https://nextreset.org/api/v1/events.json`。不得向这些站点发送账户凭证、账户 ID 或私人对话。
+- **本地活动**：Codex 会话文件和本地状态数据库用于任务、活动状态；与公开公告账本分离。
+
+## 3. 技术结构与代码地图
+
+Swift 5.9 Swift Package，SwiftUI + AppKit，macOS 14 及以上。当前安装包为 Apple Silicon（arm64），临时本机签名，**没有 Apple 公证**。不是 Electron。
+
+以下路径除单独注明外均相对 `Sources/CodexNotch/`：
+
+| 路径 | 负责什么 |
+|---|---|
+| `App/CodexNotchApp.swift`、`App/AppDelegate.swift` | 应用入口、生命周期与服务连接 |
+| `App/NotchRuntimeCoordinator.swift`、`App/AppUpdateChecker.swift` | 运行协调、窗口更新、公开版本检查 |
+| `UI/NotchView.swift`、`UI/NotchSettingsView.swift` | 顶部小窗、额度和设置界面 |
+| `Announcements/ResetExperienceCoordinator.swift` | 公告窗口、通知、正式账本路径与状态连接 |
+| `Announcements/ResetAnnouncementViews.swift` | 重置动态列表、详情、筛选及“全部已读”入口 |
+| `Announcements/ResetMonitor.swift` | 轮询、刷新、已读及人工操作的持久化与发布 |
+| `Announcements/ResetLedger.swift`、`ResetAnnouncement.swift` | 账本、合并、公告身份、未读和离开标记 |
+| `Announcements/ResetTopPresentation.swift`、`ResetAnnouncementEntriesView.swift` | 首页预告、待定摘要、经过时间及手动计时 |
+| `Announcements/ResetScheduleTiming.swift`、`ResetPendingAnnouncements.swift`、`ResetUndatedSummary.swift` | 洛杉矶日期边界、阶段和无日期预告收起 |
+| `Announcements/ResetDeliveryEvidence.swift`、`NextResetClient.swift`、`BoundedResetLinkResolver.swift` | 公开来源解析、发放证据、关联及受限短链解析 |
+| `Usage/` | 账户凭证、额度接口、到账缓存、额度恢复识别 |
+| `Window/`、`State/` | 顶部窗口几何、跨应用显示、悬停恢复、偏好和展示状态 |
+| `Monitoring/` | 本地 Codex 活动监测 |
+| 仓库 `Tests/CodexNotchTests/` | 自动回归测试 |
+| 仓库 `Resources/Info.plist`、`scripts/` | 版本、资源、编译、验证、打包 |
+| 仓库 `docs/contracts/`、`docs/decisions/` | 可检查的行为契约和历史设计记录 |
+
+## 4. 和用户合作的规则
+
+- 全程中文，少用术语；小需求不顺手改变其它功能，不恢复用户已删掉的文案。
+- 先核对当前代码、版本、实际运行应用和用户截图；不要只凭旧对话判断。
+- 已授权的修改、测试和本机更新按约定完成。缺少关键产品决定才问；未来需求若与既定决定冲突，先说明冲突并询问。用户本轮已明确替代的旧规则直接按新要求执行。
+- 预告识别、官方完成证据、账户到账、账户额度恢复、人工确认、手动重新计时、已读状态是不同职责，不能为修一个显示问题连带改其它语义。
+- 如实区分“编译通过 / 自动测试通过 / Mac 实际窗口看过 / 本机操作确认过 / 没验证”。不要把打包或模拟检查说成真实通知、登录启动已验证。
+- 本轮“全部已读”作用于全账本当前记录，与所选筛选项无关。只清除未读和离开标记，不删除历史、不确认重置、不改倒计时或经过时间。保存成功后才更新界面；失败保留状态并给出错误。点击之后新到或发生实质变化的消息继续按原规则成为未读。
+
+## 5. 必须保护的数据规则
+
+1. 正式应用和账本里是用户真实数据。覆盖安装前备份应用与公告账本；涉及账户缓存时一并备份。备份放仓库外的版本交付目录，不能提交或上传。正常退出旧应用后替换同路径 App，保留 Bundle ID，避免多个副本同时写账本。
+2. 不用空库覆盖读取失败的文件，不为修复界面删除历史。测试使用合成数据和独立临时账本，不能把测试数据写入用户正式账本。
+3. 公告原始身份及别名、未读/离开标记、官方证据、人工确认、独立计时锚点分别保存。局部操作只改其负责字段；失败不得先发布“成功”的内存状态。
+4. 兼容旧 schema-one 账本。`manualCompletedAt`、`manualTimerRestartedAt` 等可选字段在刷新、升级、重载时保留；无效或未来的本地计时锚点不参与展示。恢复备份前先核对是否会覆盖较新的用户操作。
+5. `auth.json`、Bearer 令牌、原始账户 ID、私人会话、本地数据库、真实账本、带个人数据的日志不得进入 git、测试样例、Issue、安装包或公开附件。账户及重置券身份按既有方式哈希处理。
+
+## 6. 必须保留的产品行为
+
+### 6.1 检查、消息与已读
+
+- 启动时检查，运行中约每 120 秒轮询；睡眠、解锁、网络恢复后补查。检查失败不能显示为成功。
+- 首次导入旧历史建立安静基线。使用电脑期间的新公告或实质更新可通知；离开期间发现的消息在应用内保留未读和离开提示。
+- 同一已知发放消息仅增加来源说明、原文或更强的完成表述时静默保存。发放时间、类型、范围、关联预告或取消状态的实质变化仍按原规则提醒。历史按发布时间排序，未读和离开是独立筛选。
+- “已检查接口，暂无新重置预告”表示本次检查结果，可以与以前仍待处理的预告同时存在，不能因此移除倒计时。
+- “全部已读”一次保存当前全账本，清除未读和离开提示。刷新中允许操作；后续刷新合并以最新账本为基础，不能覆盖刚保存的已读状态或把后到消息提前已读。无未读时按钮不应误导为仍有待处理项。
+
+### 6.2 预告、时钟和待定摘要
+
+- 明确日期或钟点的可见预告各自倒数。只说日期/星期时，以 `America/Los_Angeles` 作**应用参考时区，不是官方声明时区**：先倒数至该日零点，再倒数该日全天至次日零点。明确钟点按该时刻；日期边界必须说明是估算，不建议仅凭预告清空额度。
+- 洛杉矶实时时钟只显示“周几 HH:mm:ss”（24 小时制、无月日），卡片和待定详情持续更新；通知中是发送时的固定快照。北京时间只显示对应截止日的星期。
+- 预告日结束仍无完成证据时，日期预告退出首页，历史继续待确认；没有其它预告时首页才显示“暂无最新重置预告”。
+- 无明确日期不编造倒计时，合并为小摘要，带最新原帖摘录与发布时间。相对时间带原帖语境，不能把几天前的“下周”当成今天的新承诺。
+- 后来已有可信、同范围且类型相容的官方发放消息时，更早的无日期预告可仅从首页收起；历史标“后续已有重置 · 本条关联未确认”并提供发放消息入口。更晚的相容、精确账户获券也可仅收起旧无日期预告，历史标“本账户已收到重置券 · 本条关联未确认”及到账时间。
+- 以上收起均不建立完成关联、不改已读、不通知。新于发放消息的预告保留；旧预告后来补上明确时间时重新进入倒计时。
+
+### 6.3 完成证据、账户与经过时间
+
+- 官方宣布开始直接重置（one-time reset）或开始发券（banked reset）均可结束**有关联**的预告倒计时；不是随便一条发放消息就关闭所有预告。取消保留历史。
+- 优先明确关联。推断关联只能选同一洛杉矶目标日期内唯一相容的官方有日期预告，排除定向补偿和冲突类型；保存并解释推断，不静默改配。无日期预告收起只是展示规则。
+- “done”等短回复只有单个链接能解析到已由主要来源核实、时间和类型相容的预告上下文时，才可作完成证据。每轮最多解析 4 个严格合法的 HTTPS t.co 链接，用匿名、限时 HEAD；只接收官方 `thsottiaux` 帖子白名单地址，不继续请求落地页。缺上下文不能证明完成，辅助请求失败不能抹掉既有证据。
+- 经过时间独立于预告显示，取最新可信公开发放、精确账户获券、已确认账户恢复或有效人工锚点。公开发放不等于个人到账，获券不等于用券。没有可信锚点时不虚构经过时间，仍可提供独立“重新计时”入口。
+- 没有可见预告且当天有公开发放时，可显示“暂无最新重置预告（今天已重置）”至洛杉矶当日结束。最近信号为账户获券时用普通首页标题，到账说明只在经过时间处出现一次。保留公开来源署名与入口。
+- 不能凭预计时间、检查时间、未来 `granted_at`、周重置时间或券数变化制造公开完成证据。接口暂时不列记录也不是完成或删除依据。
+- 账户额度恢复识别独立运行，不修改公开预告的解析、关联、已读、通知或完成状态。用同一账户哈希、套餐和额度窗口内的原始每周用量：先建基线，已用非零变零为候选，再由后续有效样本确认。不能用四舍五入后的 100%、普通用量增加或下次截止时间反推精确到账。
+- 区分已兑换券、跨过旧周截止时间、相容官方直接重置证据。券历史不全、证据重叠或原因不明时保持待确认，不替换已确认计时。后到证据可补充或更正原因，保留首次观测时间；该时间不是服务端精确执行时间。确认后仅更新个人经过时间与来源说明。
+
+### 6.4 人工操作
+
+- 预告“人工确认完成”只保存所选原帖身份及别名的 `manualCompletedAt`，不改官方状态、`deliveryAt`、未读或官方证据；先保存后显示，重复确认幂等。刷新、重启和新别名保留首次点击时间，同一事件修订静默保存。
+- 人工确认来源及撤销入口保留在历史，首页经过时间下不显示用户已删除的解释文案。撤销只清人工标记，再依据剩余证据展示。晚到且明确关联的官方完成不移动同一人工事件的时钟；独立后续发放可以推进。
+- “重新计时”独立于预告和既有完成证据，每次点击持久化 `ledger.manualTimerRestartedAt` 后从当前时刻重算；只改经过时间，不改预告、历史、已读、通知或账户用量。较旧证据不得把时钟拨回，独立较新的证据可推进；首页不补回来源脚注。
+- 以上操作均不实际兑换重置券，也不调用账户额度重置。
+
+### 6.5 窗口与外部依赖
+
+- 保留 420pt 宽度、现有字号、顶部锚点和整卡点击区域。空预告卡使用紧凑行高，有额外未读内容才增加行；不用弹性竖向占位制造空白。多条预告内部滚动，重置券只增加所需高度。
+- 隐藏、顶部悬停、跨应用、全屏、唤醒和登录启动需要实际 Mac 验证，逻辑测试不能代替。
+- NextReset 可用性和格式由外部站点决定，不承诺 X 发帖后必然在五分钟内通知。请求和解析需有边界，失败诚实显示。
+- `/api/status` 的 `watch` 可能只是站方预测：有 `level`、`window`/`excerpt` 和观测/过期时间，却无事件身份及原帖。只忽略这类已识别结构；真实扁平/包装事件仍处理，损坏官方事件仍报错。不能把预测窗口或过期时间变成官方截止时间。
+
+## 7. 编译、测试与本机交付
+
+在仓库根目录运行：
 
 ```sh
 swift test
+./scripts/check_contracts.sh
 ./scripts/build_app.sh
 ./scripts/verify_app.sh dist/CodexNotch.app
 ./scripts/release.sh
 ```
 
-The release script runs tests, builds and verifies the app, and makes DMG/ZIP plus SHA-256 files. If `swift test` is unavailable in a restricted environment, state that limitation explicitly. There are executable self-check modes such as `--verify-reset-behavior`, `--verify-reset-source`, and `--verify-window-restoration`; report them separately from full XCTest and physical UI tests. Do not claim notarization from `codesign --verify` or that packaging alone proves notification delivery.
+`release.sh` 默认执行测试、构建、验证，再生成 `CodexNotch-<版本>-macOS-arm64.dmg`、ZIP 与 SHA-256 文件。避免无理由重复全套测试；只有新的修改、失败或未解疑点才重跑对应检查。若本机工具链导致完整 XCTest 无法运行，写清具体限制，不把自检当成完整测试。
 
-## Publication and safety
+已有可执行自检包括 `--verify-reset-behavior`、`--verify-reset-source`、`--verify-window-restoration`、`--verify-bundled-resources`。实际支持项以当前入口代码为准。`codesign --verify` 不等于 Apple 公证；安装包生成成功不等于真实通知送达。
 
-- Public download URL: `https://github.com/Jayzengcodetrip/codex-reset-reminder-mac/releases/latest`. Update-check links in source and release notes must point to this repository, never to an unrelated upstream build.
-- Keep secrets and personal data out of commits, fixtures, issue templates, release assets, and logs: `auth.json`, Bearer tokens, account IDs, private rollout content, conversation text, and local state databases. Use synthetic fixtures.
-- Public NextReset availability and schema are external dependencies. Bound parsing/network failures and display uncertainty honestly. Never promise that an X post yields a notification within five minutes.
-- The status feed's `watch` field may contain a standalone provider forecast with `level`, `window`/`excerpt` and observation/expiry times but no event identity or source post. Ignore only that recognized non-announcement shape; preserve real flat/wrapped watch events and fail malformed official announcements. Never turn a provider forecast's window or expiry into an official reset deadline.
-- Before publishing a release, verify the archive names, bundle metadata, checksums, clean-machine installation, Gatekeeper first-launch instructions, launch-at-login behavior, notifications, and the top-of-screen panel. Report any untested item as untested.
+每次交付：
+
+1. 版本号递增，更新 `Resources/Info.plist`，核对 App 设置中可见版本。产物文件名带版本；禁止只改已安装 App 内文件而不更新源码。
+2. 按修改风险做有意义的验证。已读改动检查全账本与筛选范围、保存失败、重复操作、重启持久化、刷新中点击以及后到新消息；不要为简单文案编写只复述实现的测试。
+3. 正常退出旧 App，备份应用和账本，再覆盖 `/Applications/CodexNotch.app`；启动后核对进程路径、版本、只有一个实例，实际检查结果和本次新增操作。
+4. 在真实 Mac 看布局和顶部展开/收起。未实测的登录启动、系统通知、全屏/唤醒场景单独列为未验证。
+5. 写 `版本报告/<版本> <标题>.md`，包含“问题 / 改了什么 / 验证 / 没有验证”，记录安装包和备份位置；给用户可点击的产物位置。
+
+## 8. Git 与公开发布
+
+- Git 默认仅在本机；**不推送、不创建远程 Release、不触发远程发布工作流，除非用户明确要求本次发布**。既有远程仓库保留；v0.2.14 本轮已获得明确公开发布授权。以前曾发布不能替代这条新的全局规则。
+- 提交说明用中文，发版提交以版本号开头，例如 `v0.2.14 重置动态增加全部已读`。只提交本次范围；保护其它 Agent 或用户的未提交工作。
+- 只提交源码、合成测试、项目文档和版本报告。编译产物、安装包、个人备份、凭证和真实状态不进 git。
+- 用户要求公开发布时，源码提交、版本标签、安装包需一致；核对包名、版本、校验和以及 README/发布说明。更新入口保持指向本项目：`https://github.com/Jayzengcodetrip/codex-reset-reminder-mac/releases/latest`，不能指向上游构建。
+- 发布前核对干净机器安装和 Gatekeeper 首启说明；没有条件实测就明确列出。不得把未公证写成已公证，把未验证通知/登录启动写成通过。
+
+## 9. 收工流程（主动完成）
+
+需求做完或发版本时依次：追加 `决策记录.md` → 更新本文件的版本和变化 → 写版本报告（未验证如实写）→ 检查无个人数据和无关改动 → 中文提交到本机 git → 用一两句大白话告诉用户改了什么、有什么未做。若用户要求远程发布，再按授权完成并核实远端源码、标签、安装包；否则留在本机。
+
+## 10. 常见坑点
+
+- 本机实际正式账本是 Documents 下的共用文件，不是 Monitor 的默认 Application Support 备用路径。
+- 新公告、获券、用券、每周刷新、官方临时重置、人工确认、已读是不同事件。不得为让卡片消失而伪造官方完成；“全部已读”也不意味着重置完成。
+- 两个 App 实例可能争写同一账本；安装时必须退出旧版，验收时核对实际运行路径，不能只看窗口标题。
+- 测试工具链/SDK 是否可用需现场确认；历史测试受限不是本次跳过完整测试的理由。不要为了通过编译擅自升级整套依赖。
+- 外部源补历史或改说明容易造成旧消息重播；保留身份、证据和实质变更判定，检查失败不能清空历史或产生假新消息。
+- 工程已有公开版本，不代表本次本地包自动上传。README 的下载链接是远程已发布版，只有实际发布才可声称粉丝会下载到本轮版本。
+
+## v0.2.14 本次交付实况
+
+- 2026-11-05 本机已更新到 0.2.14（34），正式窗口已看到“全部已读”并成功检查接口。
+- 290 项重置行为自检、23 项窗口恢复自检、84 条契约通过，打包及安装校验通过；完整 XCTest 因本机缺模块未执行，不能用旧 CI 冒充本版通过。
+- 91 条公告、9 条真实未读及人工计时保留。隔离的真实 SwiftUI 窗口已验证点击、保存失败、新消息和重开；正式真实未读留给用户点击处理。
+- 完整证据边界见 `版本报告/0.2.14 全部已读.md`；本机交付阶段仅本地提交；后续已获用户授权同步 GitHub，远程实际结果另记版本报告。

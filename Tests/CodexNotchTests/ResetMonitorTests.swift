@@ -93,7 +93,8 @@ final class ResetMonitorTests: XCTestCase {
         store.failSave = true
         monitor.markRead(id: "new")
         XCTAssertEqual(monitor.unreadCount, 1)
-        XCTAssertNotNil(monitor.errorMessage)
+        XCTAssertNotNil(monitor.readStateErrorMessage)
+        XCTAssertNil(monitor.errorMessage)
     }
 
     func testDelayedProviderDiagnosticsDoNotBecomeInterfaceFailureOrSuppressNewNotice() async {

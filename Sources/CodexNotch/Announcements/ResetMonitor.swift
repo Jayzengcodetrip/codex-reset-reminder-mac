@@ -12,6 +12,7 @@ final class ResetMonitor: ObservableObject {
     @Published private(set) var sourceIsFresh = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var manualConfirmationErrorMessage: String?
+    @Published private(set) var readStateErrorMessage: String?
     @Published private(set) var manualTimerRestartedAt: Date?
     @Published private(set) var hasNewPreannouncement = false
     var unreadCount: Int { records.filter(\.isUnread).count }
@@ -173,17 +174,45 @@ final class ResetMonitor: ObservableObject {
         }
     }
 
+    var canMarkAllRead: Bool {
+        !storageLoadFailed && ledger.records.contains { $0.isUnread || $0.occurredWhileAway }
+    }
+
     func markRead(id: String) {
-        guard ledger.records.contains(where: { $0.id == id && $0.isUnread }) else { return }
+        guard !storageLoadFailed,
+              ledger.records.contains(where: { $0.id == id && ($0.isUnread || $0.occurredWhileAway) }) else { return }
         var candidate = ledger
         candidate.markRead(id: id)
+        _ = saveReadState(candidate)
+    }
+
+    @discardableResult
+    func markAllRead() -> Bool {
+        guard !storageLoadFailed else {
+            readStateErrorMessage = "无法读取本地公告记录，已读状态未改变。请重新打开应用后重试。"
+            onChange?()
+            return false
+        }
+        var candidate = ledger
+        guard candidate.markAllRead() else { return false }
+        return saveReadState(candidate)
+    }
+
+    func clearReadStateError() { readStateErrorMessage = nil }
+
+    private func saveReadState(_ candidate: ResetLedger) -> Bool {
         do {
+            // Save and publish synchronously on MainActor. A refresh response
+            // subsequently merges into this ledger, preserving future updates.
             try store.save(candidate)
             ledger = candidate
+            readStateErrorMessage = nil
             publishLedger()
+            return true
         } catch {
-            errorMessage = "已读状态未能保存，公告仍保留为未读。"
+            readStateErrorMessage = "已读状态未能保存，公告仍保留为未读。请稍后重试。"
             onChange?()
+            return false
         }
     }
 
