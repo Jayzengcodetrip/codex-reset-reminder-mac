@@ -46,9 +46,12 @@ final class NotchPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
         level = .popUpMenu
-        // The visible island and hidden hover sensor both belong above other
-        // applications, including their application sets and full-screen Spaces.
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .canJoinAllApplications]
+        // Keep the island and hover sensor available in ordinary/full-screen
+        // Spaces, but let WindowServer hide both throughout Mission Control.
+        // `stationary` deliberately stays visible in that overview and blocks
+        // its Space thumbnails. Use the system's transient overview policy
+        // without polling or changing the user's display preference.
+        collectionBehavior = [.canJoinAllSpaces, .transient, .fullScreenAuxiliary, .canJoinAllApplications]
         hidesOnDeactivate = false
     }
 

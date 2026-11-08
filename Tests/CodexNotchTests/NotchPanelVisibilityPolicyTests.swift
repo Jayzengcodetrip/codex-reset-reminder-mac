@@ -124,6 +124,25 @@ final class NotchPanelVisibilityPolicyTests: XCTestCase {
         XCTAssertFalse(panel.collectionBehavior.contains(.fullScreenNone))
     }
 
+    func testPanelRequestsMissionControlHidingAndFullScreenRecovery() {
+        let panel = NotchPanel(contentRect: .zero)
+
+        // Check the requested AppKit policy, not the live Mission Control
+        // transition. Transient must not be mixed with the mutually exclusive
+        // stationary/managed overview behaviors.
+        XCTAssertTrue(panel.collectionBehavior.contains(.transient))
+        XCTAssertFalse(panel.collectionBehavior.contains(.stationary))
+        XCTAssertFalse(panel.collectionBehavior.contains(.managed))
+        XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllSpaces))
+        XCTAssertTrue(panel.collectionBehavior.contains(.fullScreenAuxiliary))
+        XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllApplications))
+        XCTAssertTrue(NotchPanelVisibilityPolicy.shouldRestoreAfterApplicationSwitch(
+            panelIsRequested: true,
+            layoutMode: .notch,
+            displayIsEnabled: false
+        ))
+    }
+
     func testHoverPanelCanJoinOtherApplicationsWithoutTakingFocus() {
         let panel = NotchPanel(contentRect: .zero)
 

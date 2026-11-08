@@ -7,15 +7,22 @@ CONFIGURATION="${CONFIGURATION:-release}"
 DIST_DIR="${1:-${DIST_DIR:-$ROOT_DIR/dist}}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 RUN_TESTS="${RUN_TESTS:-1}"
+SWIFT_OPTIONS=()
+if [[ -n "${SWIFT_BUILD_SYSTEM:-}" ]]; then
+    SWIFT_OPTIONS+=(--build-system "$SWIFT_BUILD_SYSTEM")
+fi
+if [[ -n "${SWIFT_SDK_PATH:-}" ]]; then
+    SWIFT_OPTIONS+=(--sdk "$SWIFT_SDK_PATH")
+fi
 
 cd "$ROOT_DIR"
 
 if [[ "$RUN_TESTS" == "1" ]]; then
-    swift test
+    swift test ${SWIFT_OPTIONS[@]+"${SWIFT_OPTIONS[@]}"}
 fi
 
-swift build -c "$CONFIGURATION" --product "$PRODUCT_NAME"
-BIN_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
+swift build ${SWIFT_OPTIONS[@]+"${SWIFT_OPTIONS[@]}"} -c "$CONFIGURATION" --product "$PRODUCT_NAME"
+BIN_DIR="$(swift build ${SWIFT_OPTIONS[@]+"${SWIFT_OPTIONS[@]}"} -c "$CONFIGURATION" --show-bin-path)"
 BIN_PATH="$BIN_DIR/$PRODUCT_NAME"
 APP_PATH="$DIST_DIR/$PRODUCT_NAME.app"
 

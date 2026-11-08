@@ -2376,3 +2376,33 @@ contracts:
     supersedes: []
     superseded_by: null
     last_verified_commit: null
+
+  - id: NOTCH-MISSION-CONTROL-001
+    title: Mission Control temporarily hides the card and its hover surface
+    status: active
+    statement: >-
+      The notch panel must request AppKit's transient collection behavior and
+      must hide its visible card and transparent hover surface during Mission Control.
+      Do not combine transient with stationary or managed. Preserve all-Spaces,
+      full-screen auxiliary and all-applications participation, the existing
+      panel level and the user's saved display preference. Ordinary full-screen
+      applications must still allow the compact panel and hover expansion. Returning
+      from Mission Control must restore the requested surface through the system's
+      normal window handling and the existing bounded Space recovery.
+    rationale: The former stationary policy kept the expanded card over the Space thumbnails and intercepted switching.
+    source: user-screenshot-and-Apple-NSWindow-collection-behavior-documentation
+    owner: local-customization
+    risk: medium
+    scope:
+      include: [notch-window, floating-bar, compact-state, expanded-state, hidden-hover-sensor, mission-control]
+      exclude: [quota-semantics, announcement-ledger, account-state, persistent-visibility-preference]
+    examples:
+      positive: Open Mission Control with the card expanded, select a Space thumbnail without obstruction, and hover the top again after returning to a desktop or full-screen app.
+      negative: The card stays over the thumbnails, a hover or delayed recovery raises it in the overview, or ordinary full-screen use permanently loses the hover entry.
+    guards:
+      - Tests/CodexNotchTests/NotchPanelVisibilityPolicyTests.swift
+      - Sources/CodexNotch/App/AppDelegate.swift
+      - "manual: enter Mission Control from expanded, compact and hidden-display states; linger at the top past recovery delays, select another Space, repeat rapidly and confirm hover still works after exit"
+    supersedes: []
+    superseded_by: null
+    last_verified_commit: null

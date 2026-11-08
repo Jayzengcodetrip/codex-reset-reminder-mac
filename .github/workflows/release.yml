@@ -12,23 +12,26 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
-    env:
-      RELEASE_TAG: v0.2.14
     steps:
       - uses: actions/checkout@v4
       - name: Confirm Apple Silicon runner
         run: test "$(uname -m)" = arm64
-      - name: Check tag matches app version
+      - name: Resolve release version and notes
         shell: bash
         run: |
           app_version="$(plutil -extract CFBundleShortVersionString raw -o - Resources/Info.plist)"
-          test "${RELEASE_TAG}" = "v${app_version}"
+          [[ "${app_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          release_tag="v${app_version}"
+          release_notes="docs/releases/${release_tag}.md"
+          test -s "${release_notes}"
           if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
-            test "${GITHUB_REF_NAME}" = "${RELEASE_TAG}"
+            test "${GITHUB_REF_NAME}" = "${release_tag}"
           fi
+          printf 'RELEASE_TAG=%s\nRELEASE_NOTES=%s\n' "${release_tag}" "${release_notes}" >> "${GITHUB_ENV}"
       - name: Check behavior contracts and tests
         run: |
           ./scripts/check_contracts.sh
+          python3 scripts/test_prune_release_artifacts.py
           swift test
       - name: Package Mac app
         run: RUN_TESTS=0 ./scripts/release.sh
@@ -51,4 +54,5 @@ jobs:
             dist/CodexNotch-*.sha256 \
             "${target_option[@]}" \
             --title "Codex 重置提醒 ${RELEASE_TAG}" \
-            --notes-file docs/releases/v0.2.14.md
+            --latest \
+            --notes-file "${RELEASE_NOTES}"

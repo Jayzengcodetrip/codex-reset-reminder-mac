@@ -59,5 +59,15 @@ rmdir "$DMG_MOUNT_DIR"
 DMG_MOUNT_DIR=""
 
 shasum -a 256 "$DMG_PATH" | tee "$DMG_PATH.sha256"
+
+# Prune only after both packages and their checksums have been verified. An
+# external delivery tree must be explicitly opted in; backups are always kept.
+RETENTION_ROOTS=("$DIST_DIR")
+if [[ -n "${RELEASE_RETENTION_ROOT:-}" ]]; then
+    RETENTION_ROOTS+=("$RELEASE_RETENTION_ROOT")
+fi
+python3 "$ROOT_DIR/scripts/prune_release_artifacts.py" \
+    --current-version "$VERSION" --apply "${RETENTION_ROOTS[@]}"
+
 echo "Release ZIP: $ARCHIVE_PATH"
 echo "Release DMG: $DMG_PATH"

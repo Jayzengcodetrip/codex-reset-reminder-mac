@@ -9,7 +9,7 @@
 
 应用包名保持 `CodexNotch.app`。这是在 [fengdwx/codex-notch](https://github.com/fengdwx/codex-notch) **v0.1.16** 上开发的独立派生版，采用 MIT 许可；必须保留 `LICENSE` 原版权与许可文本以及 `NOTICE.md` 署名。
 
-当前交付版本：**v0.2.14（构建 34）**，增加“全部已读”。版本元数据以 `Resources/Info.plist` 为准，安装和验证结果以 `版本报告/0.2.14 全部已读.md` 为准；写入文档不代表已经安装或通过实测。已完成本机交付及用户授权的 GitHub 公开发布；标签 `v0.2.14` 对应功能源码提交 `a08fc17361fa31bcdf29efa48f0706d0dbc6b7f0`。
+当前交付版本：**v0.2.15（构建 35）**，采用系统原生规则，在调度中心临时隐藏顶部小窗。版本元数据以 `Resources/Info.plist` 为准，安装和验证结果以 `版本报告/0.2.15 调度中心自动隐藏.md` 为准；写入文档不代表已经安装或通过实测。已完成本机交付，用户随后已明确授权本轮 GitHub 公开发布；发布前既有公开版本为 v0.2.14，其标签对应功能源码提交 `a08fc17361fa31bcdf29efa48f0706d0dbc6b7f0`，不将历史发布授权沿用到本轮。
 
 ## 2. 位置与数据
 
@@ -20,7 +20,7 @@
 | 本机正式应用 | `/Applications/CodexNotch.app` |
 | Bundle ID | `io.github.jayzengcodetrip.codexresetreminder`，不得随意改变 |
 | 构建输出 | `dist/`，不进 git；交付包复制到外部版本目录，文件名带版本号 |
-| 本轮交付目录 | `/Users/macbookpro/Documents/Codex/2026-09-12/new-chat/outputs/重置提醒-v0.2.14/` |
+| 本轮交付目录 | `/Users/macbookpro/Documents/Codex/2026-09-12/new-chat/outputs/重置提醒-v0.2.15/` |
 | 正式公告账本 | `~/Documents/Codex/QuotaReminderState/announcements.json` |
 | 账户重置券到账缓存 | `~/Library/Application Support/CodexNotch/account-reset-receipts.json` |
 | 账户额度恢复缓存 | `~/Library/Application Support/CodexNotch/account-quota-recoveries.json` |
@@ -118,6 +118,7 @@ Swift 5.9 Swift Package，SwiftUI + AppKit，macOS 14 及以上。当前安装�
 
 - 保留 420pt 宽度、现有字号、顶部锚点和整卡点击区域。空预告卡使用紧凑行高，有额外未读内容才增加行；不用弹性竖向占位制造空白。多条预告内部滚动，重置券只增加所需高度。
 - 隐藏、顶部悬停、跨应用、全屏、唤醒和登录启动需要实际 Mac 验证，逻辑测试不能代替。
+- 调度中心应由系统原生 `.transient` 暂时隐藏整个小窗及其透明悬停区域；不得与 `.stationary` 或 `.managed` 并用。保留普通全屏与所有桌面参与，不改持久显示偏好。窗口配置自检通过不代表概览动画中不闪现、缩略图点击或退出后悬停已实测。
 - NextReset 可用性和格式由外部站点决定，不承诺 X 发帖后必然在五分钟内通知。请求和解析需有边界，失败诚实显示。
 - `/api/status` 的 `watch` 可能只是站方预测：有 `level`、`window`/`excerpt` 和观测/过期时间，却无事件身份及原帖。只忽略这类已识别结构；真实扁平/包装事件仍处理，损坏官方事件仍报错。不能把预测窗口或过期时间变成官方截止时间。
 
@@ -135,6 +136,18 @@ swift test
 
 `release.sh` 默认执行测试、构建、验证，再生成 `CodexNotch-<版本>-macOS-arm64.dmg`、ZIP 与 SHA-256 文件。避免无理由重复全套测试；只有新的修改、失败或未解疑点才重跑对应检查。若本机工具链导致完整 XCTest 无法运行，写清具体限制，不把自检当成完整测试。
 
+安装包保留策略：新版本的 ZIP、DMG 和 SHA-256 都通过验证后，`release.sh` 自动执行 `scripts/prune_release_artifacts.py`，仅保留扫描范围内最新两版标准名安装包及其校验文件；通过 `RELEASE_RETENTION_ROOT` 显式指定外部交付根，默认只清理 `dist/`。独立运行该 Python 脚本默认预览，添加 `--apply` 才删除。所有备份、报告、git 历史、符号链接和含糊文件均保留；`.app` 不自动递归清理，需确认属于旧交付件，不能误删回滚副本。本轮清理范围为 `dist/` 和上表交付目录的父目录 `outputs/`。
+
+本机只有 Command Line Tools 时，默认 SDK 27.2 可能缺 `SwiftUIMacros`；已有 SDK 26.5 可显式使用：
+
+```sh
+SWIFT_BUILD_SYSTEM=native \
+SWIFT_SDK_PATH=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk \
+RUN_TESTS=0 ./scripts/release.sh
+```
+
+只有实际尝试并确认 XCTest 不可用后才使用 `RUN_TESTS=0`，同时运行可执行自检并记录限制；不能把它称为全量测试通过。未来工具链变化应重新核对，不能直接沿用旧限制。
+
 已有可执行自检包括 `--verify-reset-behavior`、`--verify-reset-source`、`--verify-window-restoration`、`--verify-bundled-resources`。实际支持项以当前入口代码为准。`codesign --verify` 不等于 Apple 公证；安装包生成成功不等于真实通知送达。
 
 每次交付：
@@ -147,7 +160,7 @@ swift test
 
 ## 8. Git 与公开发布
 
-- Git 默认仅在本机；**不推送、不创建远程 Release、不触发远程发布工作流，除非用户明确要求本次发布**。既有远程仓库保留；v0.2.14 本轮已获得明确公开发布授权。以前曾发布不能替代这条新的全局规则。
+- Git 默认仅在本机；**不推送、不创建远程 Release、不触发远程发布工作流，除非用户明确要求本次发布**。既有远程仓库保留；v0.2.15 已在 2026-11-08 获得本轮源码和安装包公开发布授权。其它版本以前曾发布不能替代新的授权。
 - 提交说明用中文，发版提交以版本号开头，例如 `v0.2.14 重置动态增加全部已读`。只提交本次范围；保护其它 Agent 或用户的未提交工作。
 - 只提交源码、合成测试、项目文档和版本报告。编译产物、安装包、个人备份、凭证和真实状态不进 git。
 - 用户要求公开发布时，源码提交、版本标签、安装包需一致；核对包名、版本、校验和以及 README/发布说明。更新入口保持指向本项目：`https://github.com/Jayzengcodetrip/codex-reset-reminder-mac/releases/latest`，不能指向上游构建。
@@ -166,9 +179,17 @@ swift test
 - 外部源补历史或改说明容易造成旧消息重播；保留身份、证据和实质变更判定，检查失败不能清空历史或产生假新消息。
 - 工程已有公开版本，不代表本次本地包自动上传。README 的下载链接是远程已发布版，只有实际发布才可声称粉丝会下载到本轮版本。
 
-## v0.2.14 本次交付实况
+## v0.2.14 历史交付实况
 
 - 2026-11-05 本机已更新到 0.2.14（34），正式窗口已看到“全部已读”并成功检查接口。
 - 290 项重置行为自检、23 项窗口恢复自检、84 条契约通过，打包及安装校验通过；本机因缺模块未运行完整 XCTest，后续 GitHub 发布流程实际执行本版 459 项测试、0 失败。
 - 91 条公告、9 条真实未读及人工计时保留。隔离的真实 SwiftUI 窗口已验证点击、保存失败、新消息和重开；正式真实未读留给用户点击处理。
 - 完整证据边界见 `版本报告/0.2.14 全部已读.md`；GitHub v0.2.14 已公开发布且为 Latest；源码标签、DMG、ZIP 和 SHA-256 已核实，公开包实际下载校验通过。
+
+## v0.2.15 本次交付实况
+
+- 2026-11-08 已正常退出、备份并更新本机至 0.2.15（35），实际设置显示新版，单一正式实例与包内二进制一致。
+- 26 项窗口配置/恢复调度自检、290 项重置行为自检、85 条行为契约、7 项产物清理测试通过；构建、DMG 和安装验证通过。
+- 91 条公告及人工计时保持，启动后只有成功检查时间正常推进。正式卡片与设置已实际看过。
+- 调度中心系统画面因操作工具超时无法完整读取，真实隐藏/恢复、顶部缩略图点击和悬停重入未完成实测；不能把 `.transient` 配置检查当作这些场景通过。本机 XCTest 仍缺模块，详见本版报告。
+- 标准交付包只剩 0.2.15 和 0.2.14；本轮清理 28 个旧包/校验文件及 20 个明确旧交付/解包 App，备份和报告保留。本机交付阶段没有远程发布；后续用户已授权发布 v0.2.15，实际结果以本版报告后续公开发布章节为准。
