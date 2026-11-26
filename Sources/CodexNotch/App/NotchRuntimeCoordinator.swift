@@ -69,6 +69,7 @@ final class NotchRuntimeCoordinator {
 
     var onOpenResetAnnouncements: (() -> Void)?
     var onConfirmResetManually: ((String) -> Void)?
+    var onDismissResetPreviewManually: ((String) -> Void)?
     var onRestartResetTimerManually: (() -> Void)?
     var onOpenUndatedAnnouncements: (() -> Void)?
     var onAccountResetReceiptChange: ((AccountResetReceipt?) -> Void)?
@@ -102,11 +103,10 @@ final class NotchRuntimeCoordinator {
         if changed && started { render() }
     }
 
-    func updateResetAnnouncements(unread: Int, awayUnread: Int, status: String, announcements: [ResetAnnouncement] = [], records: [ResetRecord] = [], manualTimerRestartedAt: Date? = nil) {
-        let priorHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount)
-        viewModel.resetUnreadCount = unread
-        viewModel.resetAwayUnreadCount = awayUnread
+    func updateResetAnnouncements(status: String, errorText: String? = nil, announcements: [ResetAnnouncement] = [], records: [ResetRecord] = [], manualTimerRestartedAt: Date? = nil) {
+        let priorHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, hasError: viewModel.resetErrorText != nil)
         viewModel.resetStatusText = status
+        viewModel.resetErrorText = errorText
         viewModel.resetPreannouncements = announcements
         viewModel.resetRecords = records
         viewModel.manualTimerRestartedAt = manualTimerRestartedAt
@@ -116,7 +116,7 @@ final class NotchRuntimeCoordinator {
             applyAccountQuotaRecovery(recovery)
         }
         viewModel.updateClock(now: nowProvider())
-        if started && priorHeight != ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount) { render() }
+        if started && priorHeight != ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, hasError: viewModel.resetErrorText != nil) { render() }
     }
 
     /// Open the existing card without changing the user's persistent visibility preference.
@@ -189,6 +189,10 @@ final class NotchRuntimeCoordinator {
         }
         viewModel.onConfirmResetManually = { [weak self] id in
             self?.onConfirmResetManually?(id)
+        }
+
+        viewModel.onDismissResetPreviewManually = { [weak self] id in
+            self?.onDismissResetPreviewManually?(id)
         }
 
         viewModel.onRestartResetTimerManually = { [weak self] in
@@ -283,19 +287,47 @@ final class NotchRuntimeCoordinator {
         rolloutMonitor.stop()
     }
 
+    private var shouldAdvanceLiveClock: Bool {
+        if isHovered { return true }
+        switch viewModel.state {
+        case .expanded, .workingCompact:
+            return true
+        case .hidden, .quotaCompact, .completedCompact:
+            return !activeSessions.isEmpty
+        }
+    }
+
+    private var shouldPollSessionsOnTimerTick: Bool {
+        guard let lastSessionSnapshot else { return true }
+        return !lastSessionSnapshot.activeSessions.isEmpty
+            || !lastSessionSnapshot.recentCompletions.isEmpty
+            || !activeSessions.isEmpty
+            || !recentCompletions.isEmpty
+    }
+
     private func handleTimerTick() {
         let now = nowProvider()
-        advanceClock(now: now)
-        pollSessions()
+        if shouldAdvanceLiveClock {
+            advanceClock(now: now)
+        }
+        if shouldPollSessionsOnTimerTick {
+            pollSessions()
+        }
         if now.timeIntervalSince(lastUsageRequestAt ?? .distantPast) >= Self.usageRefreshInterval {
             refreshUsage()
         }
     }
 
     private func advanceClock(now: Date) {
-        let oldHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount)
+        guard case .expanded = viewModel.state else {
+            viewModel.updateClock(now: now)
+            return
+        }
+        let oldHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, hasError: viewModel.resetErrorText != nil)
+        let previousClock = viewModel.now
         viewModel.updateClock(now: now)
-        let newHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount)
+        guard viewModel.now != previousClock else { return }
+        let newHeight = ResetAnnouncementEntriesView.height(for: viewModel.resetTopPresentation, hasError: viewModel.resetErrorText != nil)
         if oldHeight != newHeight { render(now: now) }
     }
 
@@ -725,11 +757,11 @@ final class NotchRuntimeCoordinator {
             quotaExpandedSize: quotaExpandedContentSize(
                 for: displayState,
                 isResetScheduleExpanded: isResetScheduleExpanded
-            ).addingResetAnnouncementEntry(presentation: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount),
+            ).addingResetAnnouncementEntry(presentation: viewModel.resetTopPresentation, hasError: viewModel.resetErrorText != nil),
             expandedSize: expandedContentSize(
                 for: displayState,
                 isResetScheduleExpanded: isResetScheduleExpanded
-            ).addingResetAnnouncementEntry(presentation: viewModel.resetTopPresentation, unreadCount: viewModel.resetUnreadCount)
+            ).addingResetAnnouncementEntry(presentation: viewModel.resetTopPresentation, hasError: viewModel.resetErrorText != nil)
         )
         let targetFrame = layout.frame(for: displayState)
         // The controller allocates the final canvas before the SwiftUI state
@@ -869,7 +901,7 @@ final class NotchRuntimeCoordinator {
 }
 
 private extension NSSize {
-    func addingResetAnnouncementEntry(presentation: ResetTopPresentation, unreadCount: Int) -> NSSize {
-        NSSize(width: width, height: height + ResetAnnouncementEntriesView.height(for: presentation, unreadCount: unreadCount) + 8)
+    func addingResetAnnouncementEntry(presentation: ResetTopPresentation, hasError: Bool) -> NSSize {
+        NSSize(width: width, height: height + ResetAnnouncementEntriesView.height(for: presentation, hasError: hasError) + 8)
     }
 }

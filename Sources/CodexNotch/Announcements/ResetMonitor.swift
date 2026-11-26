@@ -15,9 +15,9 @@ final class ResetMonitor: ObservableObject {
     @Published private(set) var readStateErrorMessage: String?
     @Published private(set) var manualTimerRestartedAt: Date?
     @Published private(set) var hasNewPreannouncement = false
+    private(set) var pendingAnnouncements: [ResetAnnouncement] = []
     var unreadCount: Int { records.filter(\.isUnread).count }
     var awayUnreadCount: Int { records.filter { $0.isUnread && $0.occurredWhileAway }.count }
-    var pendingAnnouncements: [ResetAnnouncement] { ledger.pendingAnnouncements }
     var onChange: (() -> Void)?
     var onNotify: (([ResetRecord]) -> Void)?
 
@@ -220,6 +220,36 @@ final class ResetMonitor: ObservableObject {
         !storageLoadFailed && ledger.canConfirmResetManually(id: id)
     }
 
+    func canDismissPreviewManually(id: String) -> Bool {
+        !storageLoadFailed && ledger.canDismissPreviewManually(id: id)
+    }
+
+    @discardableResult
+    func dismissPreviewManually(id: String) -> Bool {
+        guard !storageLoadFailed else {
+            manualConfirmationErrorMessage = "无法读取本地公告记录，收起操作未保存。请重新打开应用后重试。"
+            onChange?()
+            return false
+        }
+        var candidate = ledger
+        guard candidate.dismissPreviewManually(id: id, at: now()) else { return false }
+        return saveLocalManualChange(candidate,
+            failureMessage: "收起预告未能保存，首页预告未改变。请稍后重试。")
+    }
+
+    @discardableResult
+    func undoManualPreviewDismissal(id: String) -> Bool {
+        guard !storageLoadFailed else {
+            manualConfirmationErrorMessage = "无法读取本地公告记录，恢复操作未保存。请重新打开应用后重试。"
+            onChange?()
+            return false
+        }
+        var candidate = ledger
+        guard candidate.undoManualPreviewDismissal(id: id) else { return false }
+        return saveLocalManualChange(candidate,
+            failureMessage: "恢复预告未能保存，仍保留收起状态。请稍后重试。")
+    }
+
     @discardableResult
     func confirmResetManually(id: String) -> Bool {
         guard !storageLoadFailed else {
@@ -308,6 +338,7 @@ final class ResetMonitor: ObservableObject {
 
     private func publishLedger() {
         records = ledger.records
+        pendingAnnouncements = ledger.pendingAnnouncements
         manualTimerRestartedAt = ledger.manualTimerRestartedAt
         lastSuccessfulCheck = ledger.lastSuccessfulCheck
         sourceCheckedAt = ledger.sourceCheckedAt

@@ -222,12 +222,14 @@ enum ResetSelfCheck {
                   "Mixed notification batch must prioritize the latest changed pending preannouncement")
         try check(ResetNotificationText.announcement(from: secondChanges, now: now, pending: simultaneousPending)?.id == "second",
                   "The new second preannouncement must be notified without replacing the first")
-        try check(ResetAnnouncementEntriesView.height(for: 0) == 48 && ResetAnnouncementEntriesView.height(for: 1) == 138,
-                  "An active announcement must reserve room for its live Los Angeles clock")
-        try check(ResetAnnouncementEntriesView.height(for: 2) == 284 && ResetAnnouncementEntriesView.height(for: 5) == 284,
-                  "Two countdowns fit above quota and further countdowns scroll within bounded height")
-        try check(ResetAnnouncementEntriesView.height(timedCount: 0, hasUndated: true, hasDelivery: true) == 156,
+        try check(ResetAnnouncementEntriesView.height(for: 0) == 48 && ResetAnnouncementEntriesView.height(for: 1) == 72,
+                  "Compact active dated card must keep its single-timer height")
+        try check(ResetAnnouncementEntriesView.height(for: 2) == 152 && ResetAnnouncementEntriesView.height(for: 5) == 152,
+                  "Count-based helper keeps bounded two-card display height")
+        try check(ResetAnnouncementEntriesView.height(timedCount: 0, hasUndated: true, hasDelivery: true) == 136,
                   "Undated previews share a compact summary with an independent delivery clock")
+        try check(ResetAnnouncementEntriesView.height(timedCount: 0, hasUndated: true, hasDelivery: true, hasError: true) == 152,
+                  "Active preview card reserves one error row only when a feed error is present")
         try check(ResetAnnouncementEntriesView.height(timedCount: 5, hasUndated: true, hasDelivery: true) == 284,
                   "Mixed announcement content must stay bounded above weekly quota and credits")
         let pendingStore = CheckStore()
@@ -263,6 +265,17 @@ enum ResetSelfCheck {
                   "A time correction updates and notifies the existing card without inventing another preannouncement")
         let utc = ISO8601DateFormatter().date(from: "2026-09-12T20:09:00Z")!
         try check(ResetAnnouncementDisplay.beijingDate(utc) == "2026-09-13 04:09", "Beijing dates must convert correctly across UTC dates")
+        let cachedModel = NotchViewModel(state: .hidden, now: now)
+        cachedModel.resetPreannouncements = [advance]
+        cachedModel.resetRecords = [advanceRecord]
+        try check(cachedModel.resetTopPresentation.announcements.map(\.id) == [advance.id],
+                  "Cached top presentation must reflect newly assigned preannouncements")
+        cachedModel.manualTimerRestartedAt = now
+        try check(cachedModel.resetTopPresentation.secondsSinceLastDelivery == 0,
+                  "Cached top presentation must invalidate when manualTimerRestartedAt changes")
+        cachedModel.updateClock(now: now.addingTimeInterval(5))
+        try check(cachedModel.resetTopPresentation.secondsSinceLastDelivery == 5,
+                  "Cached top presentation must invalidate when model clock advances")
         checks += try await ResetReadStateSelfCheck.run()
         return checks + (try ResetTopCycleSelfCheck.run()) + (try ResetAnnouncementSummary.runSelfChecks()) + (try ResetCheckPresentation.runSelfChecks())
             + (try ResetPendingAnnouncements.runSelfChecks())

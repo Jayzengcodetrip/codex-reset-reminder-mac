@@ -3,8 +3,17 @@ import Foundation
 /// Quote relative wording in its original publication context, never as a new deadline.
 enum ResetUndatedSummary {
     static func title(count: Int, language: AppLanguage) -> String {
-        language.localized(chinese: "有 \(count) 条待定预告 · 具体时间未公布",
-                           english: "\(count) undated previews · Time not announced")
+        language.localized(chinese: "有 \(count) 条待定预告",
+                           english: count == 1 ? "1 pending preview" : "\(count) pending previews")
+    }
+
+    static func elapsedText(for announcement: ResetAnnouncement, now: Date, language: AppLanguage) -> String? {
+        guard let published = announcement.announcedAt,
+              published.timeIntervalSince1970.isFinite,
+              published <= now else { return nil }
+        let seconds = max(0, Int(now.timeIntervalSince(published)))
+        let duration = ResetTopPresentation.elapsedText(seconds: seconds, language: language)
+        return language.localized(chinese: "预告已发出 \(duration)", english: "Posted \(duration) ago")
     }
 
     static func excerpt(_ announcement: ResetAnnouncement, language: AppLanguage) -> String {
@@ -19,16 +28,24 @@ enum ResetUndatedSummary {
         return language.localized(chinese: "公告摘要：\(quote)", english: "Announcement summary: \(quote)")
     }
 
-    static func publication(_ announcement: ResetAnnouncement, language: AppLanguage) -> String {
-        guard let date = announcement.announcedAt else {
-            return language.localized(chinese: "原帖发布时间未提供", english: "Original publication time unavailable")
-        }
+    private static let publicationLock = NSLock()
+    private static let publicationFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = ResetScheduleTiming.beijing
         formatter.dateFormat = "MM-dd HH:mm"
-        return language.localized(chinese: "原帖发布：\(formatter.string(from: date))（北京）",
-                                  english: "Originally posted: \(formatter.string(from: date)) (Beijing)")
+        return formatter
+    }()
+
+    static func publication(_ announcement: ResetAnnouncement, language: AppLanguage) -> String {
+        guard let date = announcement.announcedAt else {
+            return language.localized(chinese: "原帖发布时间未提供", english: "Original publication time unavailable")
+        }
+        publicationLock.lock()
+        let formatted = publicationFormatter.string(from: date)
+        publicationLock.unlock()
+        return language.localized(chinese: "原帖发布：\(formatted)（北京）",
+                                  english: "Originally posted: \(formatted) (Beijing)")
     }
 
     private static func originalExcerpt(_ summary: String) -> String? {

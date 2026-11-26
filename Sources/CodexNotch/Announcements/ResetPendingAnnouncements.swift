@@ -7,10 +7,11 @@ enum ResetPendingAnnouncements {
         let current = records.map(\.announcement)
         let identities = identityKeys(records: records, versions: versions)
         let manual = manualCompletionDates(records: records, versions: versions)
+        let dismissed = manualDismissalDates(records: records, versions: versions)
         let deliveries = current.filter { isTerminal($0) && $0.deliveryAt != nil }
         let groups = Dictionary(grouping: current) { identities[$0.id] ?? $0.id }
         return groups.values.compactMap { group -> ResetAnnouncement? in
-            guard !group.contains(where: { manual[$0.id] != nil }) else { return nil }
+            guard !group.contains(where: { manual[$0.id] != nil || dismissed[$0.id] != nil }) else { return nil }
             let terminal = group.filter { announcement in
                 if isTerminal(announcement) { return true }
                 guard !isExplicitPending(announcement),
@@ -47,6 +48,19 @@ enum ResetPendingAnnouncements {
         var dates: [String: Date] = [:]
         for record in records {
             guard let time = record.manualCompletedAt, time.timeIntervalSince1970.isFinite,
+                  let identity = identities[record.id] else { continue }
+            dates[identity] = min(dates[identity] ?? time, time)
+        }
+        return identities.compactMapValues { dates[$0] }
+    }
+
+    static func manualDismissalDates(records: [ResetRecord],
+                                     versions: [String: [ResetAnnouncement]] = [:]) -> [String: Date] {
+        let identities = identityKeys(records: records, versions: versions)
+        var dates: [String: Date] = [:]
+        for record in records {
+            guard let time = record.manualDismissedAt, time.timeIntervalSince1970.isFinite,
+                  time.timeIntervalSince1970 > 0,
                   let identity = identities[record.id] else { continue }
             dates[identity] = min(dates[identity] ?? time, time)
         }

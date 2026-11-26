@@ -29,7 +29,7 @@ RUN_TESTS="${RUN_TESTS:-1}" \
 
 rm -f "$ARCHIVE_PATH" "$ARCHIVE_PATH.sha256" "$DMG_PATH" "$DMG_PATH.sha256"
 ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ARCHIVE_PATH"
-shasum -a 256 "$ARCHIVE_PATH" | tee "$ARCHIVE_PATH.sha256"
+(cd "$DIST_DIR" && shasum -a 256 "${ARCHIVE_PATH##*/}") | tee "$ARCHIVE_PATH.sha256"
 
 DMG_STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codex-notch-dmg-stage.XXXXXX")"
 ditto "$APP_PATH" "$DMG_STAGING_DIR/CodexNotch.app"
@@ -58,7 +58,7 @@ hdiutil detach -quiet "$DMG_MOUNT_DIR"
 rmdir "$DMG_MOUNT_DIR"
 DMG_MOUNT_DIR=""
 
-shasum -a 256 "$DMG_PATH" | tee "$DMG_PATH.sha256"
+(cd "$DIST_DIR" && shasum -a 256 "${DMG_PATH##*/}") | tee "$DMG_PATH.sha256"
 
 # Prune only after both packages and their checksums have been verified. An
 # external delivery tree must be explicitly opted in; backups are always kept.

@@ -50,6 +50,9 @@ struct ResetRecord: Codable, Identifiable, Equatable {
     /// Local user confirmation only; never official delivery evidence.
     /// Optional preserves compatibility with existing schema-one ledgers.
     var manualCompletedAt: Date? = nil
+    /// Local display-only dismissal from home previews; never alters elapsed
+    /// reset timers or official delivery evidence. Optional for schema-one compatibility.
+    var manualDismissedAt: Date? = nil
 }
 
 struct NextResetSnapshot: Equatable {

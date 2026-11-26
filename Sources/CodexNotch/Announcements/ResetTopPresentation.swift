@@ -12,6 +12,10 @@ struct ResetTopPresentation: Equatable {
     var latestDeliveryOrigin: ResetDeliveryOrigin? = nil
     var unconfirmedAccountRecovery: AccountQuotaRecovery? = nil
 
+    var hasActivePreview: Bool {
+        !announcements.isEmpty || !undatedAnnouncements.isEmpty
+    }
+
     static func make(pending: [ResetAnnouncement], records: [ResetRecord], now: Date,
                      accountReceipt: AccountResetReceipt? = nil,
                      accountRecovery: AccountQuotaRecoveryState? = nil,
@@ -25,22 +29,33 @@ struct ResetTopPresentation: Equatable {
             guard let time = $0.manualCompletedAt else { return false }
             return time.timeIntervalSince1970.isFinite && time.timeIntervalSince1970 > 0 && time <= now
         }
+        let dismissedRecords = records.filter {
+            guard let time = $0.manualDismissedAt else { return false }
+            return time.timeIntervalSince1970.isFinite && time.timeIntervalSince1970 > 0 && time <= now
+        }
         let latestManual = manualRecords.compactMap(\.manualCompletedAt).max()
         let timerRestart = manualTimerRestartedAt.flatMap { time in
             time.timeIntervalSince1970.isFinite && time.timeIntervalSince1970 > 0 && time <= now
                 ? time : nil
         }
-        func manuallyConfirmedEvent(_ announcement: ResetAnnouncement) -> Bool {
-            manualRecords.contains { record in
+        func matchesRecords(_ announcement: ResetAnnouncement, in candidates: [ResetRecord]) -> Bool {
+            candidates.contains { record in
                 if ResetPendingAnnouncements.sameIdentity(record.announcement, announcement) { return true }
                 let related = announcement.relatedAnnouncementIDs ?? []
                 return related.contains(record.id)
                     || (record.announcement.sourceURL?.lastPathComponent).map(related.contains) == true
             }
         }
+        func manuallyConfirmedEvent(_ announcement: ResetAnnouncement) -> Bool {
+            matchesRecords(announcement, in: manualRecords)
+        }
+        func manuallyDismissedEvent(_ announcement: ResetAnnouncement) -> Bool {
+            matchesRecords(announcement, in: dismissedRecords)
+        }
         let active = pending.filter { announcement in
             let status = normalizedStatus(announcement)
             return !manuallyConfirmedEvent(announcement)
+                && !manuallyDismissedEvent(announcement)
                 && !deliveryStatuses.contains(status) && !["cancelled", "canceled"].contains(status)
         }
         let visible = active.filter { announcement in
@@ -56,7 +71,11 @@ struct ResetTopPresentation: Equatable {
             }
             return now < endOfDay
         }
-        let deliveries = records.map(\.announcement).sorted {
+        let undatedCandidates = active.filter({ ResetScheduleTiming.target(for: $0) == nil }).sorted(by: {
+            let lhs = $0.announcedAt ?? .distantPast, rhs = $1.announcedAt ?? .distantPast
+            return lhs == rhs ? $0.id < $1.id : lhs < rhs
+        })
+        let deliveries: [ResetAnnouncement] = undatedCandidates.isEmpty ? [] : records.map(\.announcement).sorted {
             let lhs = ResetDeliveryEvidence.deliveryTimestamp($0) ?? .distantFuture
             let rhs = ResetDeliveryEvidence.deliveryTimestamp($1) ?? .distantFuture
             return lhs == rhs ? $0.id < $1.id : lhs < rhs
@@ -64,10 +83,7 @@ struct ResetTopPresentation: Equatable {
         var undated: [ResetAnnouncement] = []
         var archived: [String: ResetAnnouncement] = [:]
         var archivedForAccount: [String: AccountResetReceipt] = [:]
-        for announcement in active.filter({ ResetScheduleTiming.target(for: $0) == nil }).sorted(by: {
-            let lhs = $0.announcedAt ?? .distantPast, rhs = $1.announcedAt ?? .distantPast
-            return lhs == rhs ? $0.id < $1.id : lhs < rhs
-        }) {
+        for announcement in undatedCandidates {
             if let delivery = deliveries.first(where: {
                 ResetDeliveryEvidence.canArchiveUndated(announcement, after: $0, now: now)
             }) {

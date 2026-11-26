@@ -21,6 +21,23 @@ final class ResetUndatedSummaryTests: XCTestCase {
         notice.summary = String(repeating: "source ", count: 100)
         XCTAssertTrue(ResetUndatedSummary.excerpt(notice, language: .english).count < 205)
         XCTAssertTrue(ResetUndatedSummary.excerpt(notice, language: .english).hasPrefix("Announcement summary:"))
-        XCTAssertEqual(ResetUndatedSummary.title(count: 2, language: .chinese), "有 2 条待定预告 · 具体时间未公布")
+        XCTAssertEqual(ResetUndatedSummary.title(count: 2, language: .chinese), "有 2 条待定预告")
+        XCTAssertEqual(ResetUndatedSummary.title(count: 1, language: .english), "1 pending preview")
+    }
+
+    func testElapsedTimerCountsFromPublicationTimeAndRejectsMissingOrFutureDates() {
+        let published = Date(timeIntervalSince1970: 1_800_000_000)
+        let notice = ResetAnnouncement(id: "undated", title: "待定", summary: "原帖摘录：“Soon”", sourceURL: nil,
+            announcedAt: published, scheduledFor: nil, kind: "regular", scope: "broad", status: "scheduled")
+        XCTAssertEqual(ResetUndatedSummary.elapsedText(for: notice, now: published.addingTimeInterval(3_665), language: .chinese),
+                       "预告已发出 01:01:05")
+        XCTAssertEqual(ResetUndatedSummary.elapsedText(for: notice, now: published.addingTimeInterval(90_005), language: .chinese),
+                       "预告已发出 1天01:00:05")
+        XCTAssertEqual(ResetUndatedSummary.elapsedText(for: notice, now: published.addingTimeInterval(3_665), language: .english),
+                       "Posted 01:01:05 ago")
+        XCTAssertNil(ResetUndatedSummary.elapsedText(for: notice, now: published.addingTimeInterval(-1), language: .chinese))
+        var missing = notice
+        missing.announcedAt = nil
+        XCTAssertNil(ResetUndatedSummary.elapsedText(for: missing, now: published.addingTimeInterval(60), language: .chinese))
     }
 }

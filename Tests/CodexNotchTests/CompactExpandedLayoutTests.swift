@@ -22,8 +22,8 @@ final class CompactExpandedLayoutTests: XCTestCase {
 
     func testEmptyStateReservesOnlyVisibleRowsAndKeepsRestartAvailableWithoutEvidence() async {
         let plain = ResetTopPresentation(announcements: [], didResetToday: false)
-        let withUnread = ResetAnnouncementEntriesView.height(for: plain, unreadCount: 2)
-        XCTAssertEqual(withUnread - ResetAnnouncementEntriesView.height(for: plain), 14)
+        let withError = ResetAnnouncementEntriesView.height(for: plain, hasError: true)
+        XCTAssertEqual(withError, ResetAnnouncementEntriesView.height(for: plain))
         XCTAssertEqual(ResetAnnouncementEntryView.emptyHeight, 48)
         XCTAssertGreaterThan(ResetAnnouncementEntriesView.height(for: plain), ResetAnnouncementEntryView.emptyHeight)
         let restarted = ResetTopPresentation.make(pending: [], records: [], now: Date(timeIntervalSince1970: 1_800_000_030),
@@ -38,6 +38,9 @@ final class CompactExpandedLayoutTests: XCTestCase {
     func testDatedPreviewsKeepTheirReadableRowsWhileExtraPreviewsScroll() async {
         let two = ResetAnnouncementEntriesView.height(timedCount: 2, hasUndated: false, hasDelivery: false)
         XCTAssertGreaterThanOrEqual(two, ResetAnnouncementEntryView.announcementHeight * 2)
+        let withError = ResetAnnouncementEntriesView.height(timedCount: 1, hasUndated: false, hasDelivery: false, hasError: true)
+        let withoutError = ResetAnnouncementEntriesView.height(timedCount: 1, hasUndated: false, hasDelivery: false, hasError: false)
+        XCTAssertEqual(withError - withoutError, ResetAnnouncementEntriesView.errorRowHeight)
         let many = ResetAnnouncementEntriesView.height(timedCount: 8, hasUndated: true,
             hasDelivery: true, hasUnconfirmed: true)
         XCTAssertEqual(many, ResetAnnouncementEntriesView.maximumHeight)

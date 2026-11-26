@@ -2349,7 +2349,7 @@ contracts:
 
   - id: RESET-MARK-ALL-READ-001
     title: Explicit bulk acknowledgement persists before clearing indicators
-    status: active
+    status: superseded
     statement: >-
       Mark all read acknowledges every current ledger record across filters, clearing
       unread and away flags only after the candidate ledger saves successfully.
@@ -2374,6 +2374,46 @@ contracts:
       - Sources/CodexNotch/Announcements/ResetReadStateSelfCheck.swift
       - "manual: click the actual history view in an isolated native fixture; verify installed button and preserved real unread records"
     supersedes: []
+    superseded_by: RESET-ACTIVE-PREVIEW-BOARD-001
+    last_verified_commit: null
+
+  - id: RESET-ACTIVE-PREVIEW-BOARD-001
+    title: Show active previews with live timers, manual dismissal, and red error cues without unread UI
+    status: active
+    statement: >-
+      Remove unread and away UI elements across the notch, home cards, and history window,
+      including Mark all read, unread/away filters, unread dots, and away banners, while keeping
+      schema-one ledger compatibility and awake macOS notifications. Light the compact notch
+      orange dot whenever an active preview exists and clear it once all previews resolve or
+      are hidden. Show one primary live timer per active home preview card: a positive elapsed
+      timer from publication time for undated previews (never fabricated when publication time
+      is missing or future) and a single countdown for dated previews, omitting Los Angeles
+      clock, Beijing weekday, and long boundary disclaimers on the compact home card while
+      keeping Los Angeles boundary calculations in the backend. Display feed/network check
+      errors in red on home cards and in the history window, hiding routine check status on
+      active preview cards. Provide reversible manual preview dismissal (manualDismissedAt)
+      that hides only the selected original post and aliases from the home card and pending
+      filter after atomic persistence, without modifying elapsed reset timers, account quota,
+      or official completion evidence.
+    rationale: Users treat this tool as a live preview status board rather than an inbox; unread flags conflicted visually with persistent orange pending cards, while an elapsed-since-post timer lets users judge undated rollout timing directly.
+    source: user-request
+    owner: local-customization
+    risk: medium
+    scope:
+      include: [active-preview-board, undated-elapsed-timer, manual-preview-dismissal, compact-indicator, error-styling]
+      exclude: [account-authentication, credit-redemption, quota-semantics, mission-control-window-policy]
+    examples:
+      positive: An active undated preview lights the compact orange dot, shows a live elapsed timer from its original post time, and hiding it extinguishes the dot without changing the elapsed reset clock; undo restores it.
+      negative: Showing unread badges or Mark all read in the UI, fabricating elapsed time without a publication date, changing the reset elapsed timer on manual dismissal, or colouring feed errors orange instead of red.
+    guards:
+      - Tests/CodexNotchTests/ResetManualDismissalTests.swift
+      - Tests/CodexNotchTests/ResetUndatedSummaryTests.swift
+      - Tests/CodexNotchTests/ResetAnnouncementsNavigationTests.swift
+      - Tests/CodexNotchTests/CompactExpandedLayoutTests.swift
+      - Sources/CodexNotch/Announcements/ResetReadStateSelfCheck.swift
+      - Sources/CodexNotch/Announcements/ResetSelfCheck.swift
+      - "manual: verify active undated preview timer, compact orange dot, hide/restore flow without moving reset timer, and history window on macOS"
+    supersedes: [RESET-MARK-ALL-READ-001]
     superseded_by: null
     last_verified_commit: null
 

@@ -164,17 +164,104 @@ enum ResetReadStateSelfCheck {
                   "Repeated current snapshot must not replay the acknowledged material revision")
 
         let navigation = ResetAnnouncementsNavigation()
-        navigation.selectRecord(id: second.id, markRead: { _ in })
-        for filter in [ResetAnnouncementFilter.unread, .away] {
-            navigation.filter = filter
-            try check(navigation.visibleRecords(from: initial.records, undated: []).count > 0,
-                      "Synthetic filter must begin with unread/away content")
-            try check(navigation.visibleRecords(from: failing.records, undated: []).isEmpty
-                && navigation.selectedID == second.id, "Acknowledgement must empty filters without clearing selected detail")
-        }
+        navigation.selectRecord(id: second.id)
+        navigation.filter = .undated
+        try check(navigation.visibleRecords(from: initial.records, activePending: [second]).map(\.id) == [second.id],
+                  "Pending filter must follow active previews")
         navigation.filter = .all
-        try check(navigation.visibleRecords(from: failing.records, undated: []).count == initial.records.count,
-                  "All-history filter must preserve acknowledged entries")
+        try check(navigation.visibleRecords(from: failing.records, activePending: []).count == initial.records.count
+            && navigation.selectedID == second.id,
+                  "All-history filter must preserve history and selection")
+
+        // Verify v0.2.18 manual preview dismissal, undated elapsed timer, and home status/error helpers.
+        var undatedPost = post("dismiss-undated", age: 9_015, deadline: 600)
+        undatedPost.scheduledFor = nil
+        undatedPost.sourceURL = URL(string: "https://x.com/thsottiaux/status/991001")
+        try check(ResetUndatedSummary.title(count: 1, language: .chinese) == "有 1 条待定预告",
+                  "Undated summary title must stay concise")
+        try check(ResetUndatedSummary.elapsedText(for: undatedPost, now: now, language: .chinese) == "预告已发出 02:30:15",
+                  "Undated elapsed timer must count up from publication time")
+        var dayOldPost = undatedPost
+        dayOldPost.announcedAt = now.addingTimeInterval(-90_005)
+        try check(ResetUndatedSummary.elapsedText(for: dayOldPost, now: now, language: .chinese) == "预告已发出 1天01:00:05",
+                  "Undated elapsed timer must include whole days after 24 hours")
+        var futurePost = undatedPost
+        futurePost.announcedAt = now.addingTimeInterval(60)
+        try check(ResetUndatedSummary.elapsedText(for: futurePost, now: now, language: .chinese) == nil,
+                  "Future publication timestamp must not fabricate an elapsed timer")
+        var missingPubPost = undatedPost
+        missingPubPost.announcedAt = nil
+        try check(ResetUndatedSummary.elapsedText(for: missingPubPost, now: now, language: .chinese) == nil,
+                  "Missing publication timestamp must not fabricate an elapsed timer")
+        try check(ResetCheckPresentation.homeStatusText(isChecking: false, errorMessage: nil,
+            lastSuccessfulCheck: ISO8601DateFormatter().date(from: "2026-09-22T09:22:00Z")!, language: .chinese) == "17:22 已检查接口",
+                  "Home status text must stay concise on successful check")
+        try check(ResetCheckPresentation.homeErrorText(isChecking: false, errorMessage: "Timeout", language: .chinese) == "检查遇到问题",
+                  "Home error text must surface active feed errors")
+        try check(ResetCheckPresentation.homeErrorText(isChecking: true, errorMessage: "Timeout", language: .chinese) == nil,
+                  "In-progress check must not display stale error text")
+
+        let priorDelivery = ResetAnnouncement(id: "prior-delivery", title: "官方已重置", summary: "We have reset usage limits.",
+            sourceURL: URL(string: "https://x.com/thsottiaux/status/990001"), announcedAt: now.addingTimeInterval(-86_400),
+            scheduledFor: nil, kind: "regular", scope: "broad", status: "completed",
+            deliveryAt: now.addingTimeInterval(-86_400), deliveryKind: "regular")
+        var dismissLedger = ResetLedger()
+        dismissLedger.baselineCompleted = true
+        dismissLedger.deliveryEvidenceBaselineCompleted = true
+        dismissLedger.records = [
+            ResetRecord(id: undatedPost.id, announcement: undatedPost, isUnread: false, occurredWhileAway: false),
+            ResetRecord(id: priorDelivery.id, announcement: priorDelivery, isUnread: false, occurredWhileAway: false)
+        ]
+        dismissLedger.versions = Dictionary(uniqueKeysWithValues: dismissLedger.records.map { ($0.id, [$0.announcement]) })
+        let beforeDismissTop = top(dismissLedger)
+        try check(beforeDismissTop.hasActivePreview && beforeDismissTop.secondsSinceLastDelivery == 86_400,
+                  "Active undated preview must light the compact preview indicator")
+        let dismissStore = MemoryStore(ledger: dismissLedger)
+        let dismissMonitor = ResetMonitor(store: dismissStore, fetchSnapshot: {
+            NextResetSnapshot(announcements: [undatedPost, priorDelivery], sourceCheckedAt: now, sourceIsFresh: true)
+        }, now: { now }, idleSeconds: { 0 }, minimumRefreshInterval: 0)
+        defer { dismissMonitor.stop() }
+        dismissStore.failSave = true
+        try check(!dismissMonitor.dismissPreviewManually(id: undatedPost.id)
+                  && dismissMonitor.manualConfirmationErrorMessage != nil
+                  && dismissMonitor.pendingAnnouncements.count == 1,
+                  "Failed dismissal save must leave active previews unchanged and report an error")
+        dismissStore.failSave = false
+        try check(dismissMonitor.dismissPreviewManually(id: undatedPost.id)
+                  && dismissMonitor.manualConfirmationErrorMessage == nil
+                  && dismissMonitor.pendingAnnouncements.isEmpty,
+                  "Dismissal must remove preview from pending list after atomic save")
+        let dismissedTop = ResetTopPresentation.make(pending: dismissMonitor.pendingAnnouncements,
+                                                     records: dismissMonitor.records, now: now)
+        try check(!dismissedTop.hasActivePreview
+                  && dismissedTop.secondsSinceLastDelivery == 86_400
+                  && dismissedTop.latestDeliveryOrigin == .publicAnnouncement,
+                  "Manual dismissal must turn off active preview indicator without changing reset elapsed timer")
+        try check(dismissMonitor.records.first { $0.id == undatedPost.id }?.manualDismissedAt == now
+                  && dismissMonitor.records.first { $0.id == undatedPost.id }?.manualCompletedAt == nil
+                  && dismissMonitor.records.first { $0.id == undatedPost.id }?.announcement.status == "scheduled",
+                  "Manual dismissal must preserve public announcement status and keep manualCompletedAt nil")
+        try await refresh(dismissMonitor)
+        try check(dismissMonitor.pendingAnnouncements.isEmpty
+                  && dismissMonitor.records.first { $0.id == undatedPost.id }?.manualDismissedAt == now,
+                  "Background refresh must not revive a manually dismissed preview")
+        // Verify schema-one JSON compatibility when manualDismissedAt is absent.
+        if let savedDismiss = dismissStore.ledger {
+            var jsonObj = try JSONSerialization.jsonObject(with: JSONEncoder().encode(savedDismiss)) as! [String: Any]
+            var rows = jsonObj["records"] as! [[String: Any]]
+            for idx in rows.indices { rows[idx].removeValue(forKey: "manualDismissedAt") }
+            jsonObj["records"] = rows
+            let decodedLegacy = try JSONDecoder().decode(ResetLedger.self, from: JSONSerialization.data(withJSONObject: jsonObj))
+            try check(decodedLegacy.schemaVersion == 1 && decodedLegacy.records.allSatisfy { $0.manualDismissedAt == nil },
+                      "Schema-one ledgers without manualDismissedAt must decode cleanly")
+        }
+        try check(dismissMonitor.undoManualPreviewDismissal(id: undatedPost.id)
+                  && dismissMonitor.pendingAnnouncements.map(\.id) == [undatedPost.id],
+                  "Undo dismissal must restore a non-terminal preview to the home card")
+        let restoredTop = ResetTopPresentation.make(pending: dismissMonitor.pendingAnnouncements,
+                                                    records: dismissMonitor.records, now: now)
+        try check(restoredTop.hasActivePreview && restoredTop.secondsSinceLastDelivery == 86_400,
+                  "Restoring a dismissed preview must keep elapsed reset timer unchanged")
 
         let singleStore = MemoryStore(ledger: initial)
         let single = ResetMonitor(store: singleStore, fetchSnapshot: { snapshot() }, now: { now })

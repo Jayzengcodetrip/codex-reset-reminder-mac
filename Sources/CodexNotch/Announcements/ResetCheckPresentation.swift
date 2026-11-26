@@ -33,6 +33,30 @@ enum ResetCheckPresentation {
         return language.localized(chinese: "\(time)（北京）\(result)", english: "\(time) Beijing · \(result)")
     }
 
+    static func homeStatusText(isChecking: Bool, errorMessage: String?,
+                               lastSuccessfulCheck: Date?, language: AppLanguage) -> String {
+        if let interruption = interruptionText(isChecking: isChecking, errorMessage: errorMessage,
+                                               lastSuccessfulCheck: lastSuccessfulCheck, language: language) {
+            return interruption
+        }
+        guard let lastSuccessfulCheck else {
+            return language.localized(chinese: "等待首次检查", english: "Waiting for first check")
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.dateFormat = "HH:mm"
+        let time = formatter.string(from: lastSuccessfulCheck)
+        return language.localized(chinese: "\(time) 已检查接口", english: "Checked at \(time)")
+    }
+
+    static func homeErrorText(isChecking: Bool, errorMessage: String?, language: AppLanguage) -> String? {
+        guard !isChecking, let errorMessage,
+              !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return language.localized(chinese: "检查遇到问题", english: "Check failed")
+    }
+
     private static func interruptionText(isChecking: Bool, errorMessage: String?,
                                          lastSuccessfulCheck: Date?, language: AppLanguage) -> String? {
         if isChecking {

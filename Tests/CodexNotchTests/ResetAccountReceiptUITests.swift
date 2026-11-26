@@ -41,19 +41,17 @@ final class ResetAccountReceiptUITests: XCTestCase {
             "暂无最新重置预告（今天已重置）")
     }
 
-    func testReceiptUpdateDoesNotNavigateOrMarkAnAnnouncementRead() async {
+    func testReceiptUpdateDoesNotNavigateOrChangeFilter() async {
         let navigation = ResetAnnouncementsNavigation()
-        var acknowledged: [String] = []
-        navigation.filter = .away
-        navigation.selectRecord(id: "unresolved-preview") { acknowledged.append($0) }
+        navigation.filter = .undated
+        navigation.selectRecord(id: "unresolved-preview")
         let grant = AccountResetReceipt(grantedAt: Date(timeIntervalSince1970: 1_780_000_000),
                                         title: "Credit granted", description: nil)
 
         navigation.updateAccountReceipt(grant)
 
         XCTAssertEqual(navigation.accountReceipt, grant)
-        XCTAssertEqual(navigation.filter, .away)
+        XCTAssertEqual(navigation.filter, .undated)
         XCTAssertEqual(navigation.selectedID, "unresolved-preview")
-        XCTAssertEqual(acknowledged, ["unresolved-preview"])
     }
 }

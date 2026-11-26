@@ -87,7 +87,7 @@ enum ResetNotificationText {
 final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelegate {
     let monitor: ResetMonitor
     private let announcementNavigation = ResetAnnouncementsNavigation()
-    var onStatusChange: ((Int, Int, String, [ResetAnnouncement], [ResetRecord], Date?) -> Void)?
+    var onStatusChange: ((String, String?, [ResetAnnouncement], [ResetRecord], Date?) -> Void)?
     var onShowSummary: (() -> Void)?
     private let notificationCenter = UNUserNotificationCenter.current()
     private var detailWindow: NSWindow?
@@ -166,9 +166,23 @@ final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelega
             window.center()
             detailWindow = window
         }
-        NSApp.activate(ignoringOtherApps: true)
-        detailWindow?.makeKeyAndOrderFront(nil)
+        guard let window = detailWindow else { return }
+        Self.presentOnActiveSpace(window)
         // Opening the window itself must not mark any announcement read.
+    }
+
+    /// The app is an accessory behind a non-activating panel, so macOS may
+    /// refuse to activate it or to switch to the Space where the window was
+    /// first opened. Bring the history window to the current Space instead,
+    /// restore it from the Dock, and order it in even if activation is declined.
+    static let historyWindowBehavior: NSWindow.CollectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+
+    static func presentOnActiveSpace(_ window: NSWindow) {
+        window.collectionBehavior.insert(historyWindowBehavior)
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     func showUndatedAnnouncements() {
@@ -184,14 +198,15 @@ final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelega
 
     private func publishStatus() {
         let pending = monitor.pendingAnnouncements
-        let status = ResetCheckPresentation.compactText(
+        let language = AppLanguage.fromStoredValue(UserDefaults.standard.string(forKey: AppLanguage.storageKey))
+        let status = ResetCheckPresentation.homeStatusText(
             isChecking: monitor.isChecking, errorMessage: monitor.errorMessage,
-            lastSuccessfulCheck: monitor.lastSuccessfulCheck, hasPending: !pending.isEmpty,
-            unreadCount: monitor.unreadCount,
-            language: AppLanguage.fromStoredValue(UserDefaults.standard.string(forKey: AppLanguage.storageKey)),
-            hasNewPreannouncement: monitor.hasNewPreannouncement
+            lastSuccessfulCheck: monitor.lastSuccessfulCheck, language: language
         )
-        onStatusChange?(monitor.unreadCount, monitor.awayUnreadCount, status, pending, monitor.records, monitor.manualTimerRestartedAt)
+        let errorText = ResetCheckPresentation.homeErrorText(
+            isChecking: monitor.isChecking, errorMessage: monitor.errorMessage, language: language
+        )
+        onStatusChange?(status, errorText, pending, monitor.records, monitor.manualTimerRestartedAt)
     }
 
     private func notify(_ records: [ResetRecord]) {
@@ -236,7 +251,7 @@ final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelega
         }
         let content = UNMutableNotificationContent()
         content.title = "【测试】额度提醒已连接"
-        content.body = "这是一条测试通知。公开接口出现新公告后，会在这里提醒你；此测试不会制造未读公告。"
+        content.body = "这是一条测试通知。公开接口出现新公告后，会在这里提醒你；此测试不会新增公告记录。"
         content.sound = .default
         try? await notificationCenter.add(UNNotificationRequest(
             identifier: "reset-reminder-test", content: content,
@@ -258,7 +273,7 @@ final class ResetExperienceCoordinator: NSObject, UNUserNotificationCenterDelega
         case .authorized, .provisional:
             status = settings.alertSetting == .enabled
                 ? "系统通知已允许" : "通知已允许，横幅需在系统设置中开启"
-        case .denied: status = "系统通知尚未允许 · 未读公告仍会保留"
+        case .denied: status = "系统通知尚未允许 · 公告记录仍会保留在应用内"
         case .notDetermined: status = "等待系统通知授权"
         default: status = "请检查系统通知设置"
         }

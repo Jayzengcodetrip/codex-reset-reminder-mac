@@ -62,11 +62,66 @@ enum ResetDeliveryEvidence {
         }
     }
 
+    private static let strictCompletionLinkRegex = try! NSRegularExpression(
+        pattern: #"\A\s*(?:Done and dusted|It's done|It’s done|All done|Done)[.!]?\s+(https://\S+)\s*\z"#,
+        options: [.caseInsensitive]
+    )
+    private static let shortLinkPathRegex = try! NSRegularExpression(
+        pattern: #"\A/[A-Za-z0-9]{1,128}\z"#
+    )
+    private static let directResetRegex = try! NSRegularExpression(
+        pattern: #"\bone[- ]time\s+reset\b|\b(?:direct|hard|automatic|global)\s+reset\b|直接重置"#,
+        options: [.caseInsensitive]
+    )
+    private static let bankedDeliveryRegexes: [NSRegularExpression] = [
+        #"\b(?:we|i)\s+(?:are|am)\s+(?:now\s+)?(?:loading|adding|crediting|granting|issuing|distributing)\s+(?:a|one|an|another|the|\d+)\s+(?:full\s+)?banked\s+reset\b"#,
+        #"\b(?:we|i)(?:\s+have|'ve)\s+(?:now\s+)?(?:added|credited|granted|issued|distributed|loaded)\s+(?:a|one|an|another|the|\d+)\s+(?:full\s+)?banked\s+reset\b"#,
+        #"^\s*(?:added|credited|granted|issued|distributed|loaded)\s+(?:a|one|an|another|the|\d+)\s+(?:full\s+)?banked\s+reset\s+(?:to|into|for)\b"#,
+        #"\bbanked\s+resets?\s+(?:have|has)\s+(?:now\s+)?been\s+(?:added|credited|granted|issued|distributed|loaded)\b"#,
+        #"\bbanked\s+resets?\s+(?:have|has)\s+(?:now\s+)?(?:landed|arrived|rolled\s+out)\b"#
+    ].map { try! NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+    private static let directDeliveryRegexes: [NSRegularExpression] = [
+        #"\b(?:we|i)(?:\s+have|'ve)\s+(?:now\s+)?reset\s+(?:(?:everyone's|all|the|codex)\s+)*(?:usage|rate|limits)\b"#,
+        #"\b(?:we|i)\s+(?:are|am)\s+(?:once\s+again\s+|now\s+)?resetting\s+(?:the\s+)?(?:usage|rate|limits)\b"#,
+        #"\b(?:we|i)\s+(?:are|am)\s+(?:now\s+)?reseting\s+(?:the\s+)?(?:usage|rate|limits)\b"#,
+        #"\b(?:usage|rate)\s+limits\s+(?:have|has)\s+(?:now\s+)?been\s+reset\b"#,
+        #"^\s*(?:resets?\s+(?:(?:has|have)\s+been\s+)?(?:all\s+)?propagated|all\s+reset\s+for\s+everyone|reset\s+button\s+pressed)\b"#
+    ].map { try! NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+    private static let indirectPrefixRegex = try! NSRegularExpression(
+        pattern: #"\b(?:if|unless|wish|hope|said|says|claim|claims|heard|told|reported|reportedly|not|never)\b|[“\"]"#,
+        options: [.caseInsensitive]
+    )
+    private static let negationSentenceRegex = try! NSRegularExpression(
+        pattern: #"\b(?:not|never|haven't|hasn't|isn't|aren't|didn't)\b"#,
+        options: [.caseInsensitive]
+    )
+    private static let promisedBankedRegex = try! NSRegularExpression(
+        pattern: #"\bbanked\s+reset\b|重置券|可兑换重置"#,
+        options: [.caseInsensitive]
+    )
+    private static let promisedDirectRegex = try! NSRegularExpression(
+        pattern: #"\bone[- ]time\s+reset\b|\b(?:hard|automatic|global)\s+reset\b|直接重置"#,
+        options: [.caseInsensitive]
+    )
+    private static let separateBenefitRegex = try! NSRegularExpression(
+        pattern: #"\b(?:compensat\w*|refund\w*|(?:affected|some|selected)\s+(?:users|accounts)|\d+\s*%\s+of\s+users|\d+[km]\s+users)\b|补偿|赔偿|部分用户"#,
+        options: [.caseInsensitive]
+    )
+    private static let sentenceSeparators = CharacterSet(charactersIn: ".!?\n")
+    private static let iso8601FractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let iso8601PlainFormatter = ISO8601DateFormatter()
+
+    private static func matches(_ regex: NSRegularExpression, in text: String) -> Bool {
+        regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
     private static func strictCompletionLink(in text: String) -> URL? {
-        let pattern = #"\A\s*(?:Done and dusted|It's done|It’s done|All done|Done)[.!]?\s+(https://\S+)\s*\z"#
         guard text.count <= 4096,
-              let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let match = strictCompletionLinkRegex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
               let linkRange = Range(match.range(at: 1), in: text),
               let link = URL(string: String(text[linkRange])),
               isCompletionShortLink(link) || strictOfficialPost(link) != nil else { return nil }
@@ -77,7 +132,7 @@ enum ResetDeliveryEvidence {
         guard url.scheme?.lowercased() == "https", url.host?.lowercased() == "t.co",
               url.user == nil, url.password == nil, url.port == nil,
               url.query == nil, url.fragment == nil else { return false }
-        return url.path.range(of: #"\A/[A-Za-z0-9]{1,128}\z"#, options: .regularExpression) != nil
+        return matches(shortLinkPathRegex, in: url.path)
     }
 
     private static func strictOfficialPost(_ url: URL) -> (id: String, author: String)? {
@@ -156,19 +211,18 @@ enum ResetDeliveryEvidence {
     static func canArchiveUndated(_ announcement: ResetAnnouncement,
                                   after delivery: ResetAnnouncement, now: Date) -> Bool {
         guard announcement.scheduledFor == nil,
+              let announcedAt = announcement.announcedAt,
+              let deliveredAt = deliveryTimestamp(delivery),
+              deliveredAt > announcedAt, deliveredAt <= now,
+              delivery.announcedAt.map({ $0 <= now }) != false,
               !terminalStatuses.contains(normalized(announcement.status)),
               !targetedScopes.contains(normalized(announcement.scope)),
-              !isSeparateBenefit(announcement.title + " " + announcement.summary),
-              let announcedAt = announcement.announcedAt,
               let previewPost = officialPost(announcement.sourceURL),
               let deliveryPost = officialPost(delivery.sourceURL),
               previewPost.author == deliveryPost.author, previewPost.id != deliveryPost.id,
-              isGeneralDelivery(delivery),
-              let deliveredAt = deliveryTimestamp(delivery),
-              deliveredAt > announcedAt, deliveredAt <= now,
-              delivery.announcedAt.map({ $0 <= now }) != false else { return false }
-
-        guard deliveryScopeCoversPreview(delivery.scope, previewScope: announcement.scope) else { return false }
+              deliveryScopeCoversPreview(delivery.scope, previewScope: announcement.scope),
+              !isSeparateBenefit(announcement.title + " " + announcement.summary),
+              isGeneralDelivery(delivery) else { return false }
 
         // `regular` on legacy previews is a provider's generic category, not
         // an explicit promise of an automatic one-time reset.
@@ -195,14 +249,14 @@ enum ResetDeliveryEvidence {
                                   for receipt: AccountResetReceipt, now: Date) -> Bool {
         let eligibleScopes: Set<String> = ["", "unspecified", "broad", "all", "global", "general", "codex"]
         guard announcement.scheduledFor == nil,
+              let announcedAt = announcement.announcedAt,
+              receipt.grantedAt > announcedAt, receipt.grantedAt <= now,
               !terminalStatuses.contains(normalized(announcement.status)),
               eligibleScopes.contains(normalized(announcement.scope)),
               officialPost(announcement.sourceURL) != nil,
               !isSeparateBenefit(announcement.title + " " + announcement.summary),
               !explicitlyMentionsDirectReset(announcement.title + " " + announcement.summary),
-              isGeneralAccountReceipt(receipt),
-              let announcedAt = announcement.announcedAt,
-              receipt.grantedAt > announcedAt, receipt.grantedAt <= now else { return false }
+              isGeneralAccountReceipt(receipt) else { return false }
         let requestedKind = promisedKind(announcement.title + " " + announcement.summary)
             ?? explicitPreviewKind(announcement.kind)
         return requestedKind == nil || requestedKind == "banked"
@@ -211,8 +265,7 @@ enum ResetDeliveryEvidence {
     private static func explicitlyMentionsDirectReset(_ text: String) -> Bool {
         // Even a combined promise of banked and direct resets cannot be retired
         // solely because the account received its banked part.
-        text.range(of: #"\bone[- ]time\s+reset\b|\b(?:direct|hard|automatic|global)\s+reset\b|直接重置"#,
-                   options: [.regularExpression, .caseInsensitive]) != nil
+        matches(directResetRegex, in: text)
     }
 
     private static func deliveryScopeCoversPreview(_ deliveryScope: String, previewScope: String) -> Bool {
@@ -392,32 +445,18 @@ enum ResetDeliveryEvidence {
     private static func deliveryKind(in text: String) -> String? {
         let sentences = text.replacingOccurrences(of: "’", with: "'")
             .replacingOccurrences(of: "**", with: "")
-            .components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
+            .components(separatedBy: sentenceSeparators)
         var kinds = Set<String>()
-        let banked = [
-            #"\b(?:we|i)\s+(?:are|am)\s+(?:now\s+)?(?:loading|adding|crediting|granting|issuing|distributing)\s+(?:a|one|an|another|the|\d+)\s+(?:full\s+)?banked\s+reset\b"#,
-            #"\b(?:we|i)(?:\s+have|'ve)\s+(?:now\s+)?(?:added|credited|granted|issued|distributed|loaded)\s+(?:a|one|an|another|the|\d+)\s+(?:full\s+)?banked\s+reset\b"#,
-            #"^\s*(?:added|credited|granted|issued|distributed|loaded)\s+(?:a|one|an|another|the|\d+)\s+(?:full\s+)?banked\s+reset\s+(?:to|into|for)\b"#,
-            #"\bbanked\s+resets?\s+(?:have|has)\s+(?:now\s+)?been\s+(?:added|credited|granted|issued|distributed|loaded)\b"#,
-            #"\bbanked\s+resets?\s+(?:have|has)\s+(?:now\s+)?(?:landed|arrived|rolled\s+out)\b"#
-        ]
-        let direct = [
-            #"\b(?:we|i)(?:\s+have|'ve)\s+(?:now\s+)?reset\s+(?:(?:everyone's|all|the|codex)\s+)*(?:usage|rate|limits)\b"#,
-            #"\b(?:we|i)\s+(?:are|am)\s+(?:once\s+again\s+|now\s+)?resetting\s+(?:the\s+)?(?:usage|rate|limits)\b"#,
-            #"\b(?:we|i)\s+(?:are|am)\s+(?:now\s+)?reseting\s+(?:the\s+)?(?:usage|rate|limits)\b"#,
-            #"\b(?:usage|rate)\s+limits\s+(?:have|has)\s+(?:now\s+)?been\s+reset\b"#,
-            #"^\s*(?:resets?\s+(?:(?:has|have)\s+been\s+)?(?:all\s+)?propagated|all\s+reset\s+for\s+everyone|reset\s+button\s+pressed)\b"#
-        ]
         for sentence in sentences {
-            for (kind, patterns) in [("banked", banked), ("regular", direct)] {
-                for pattern in patterns {
-                    guard let match = sentence.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else { continue }
-                    let prefix = String(sentence[..<match.lowerBound])
+            let fullRange = NSRange(sentence.startIndex..., in: sentence)
+            for (kind, regexes) in [("banked", bankedDeliveryRegexes), ("regular", directDeliveryRegexes)] {
+                for regex in regexes {
+                    guard let match = regex.firstMatch(in: sentence, range: fullRange),
+                          let matchRange = Range(match.range, in: sentence) else { continue }
+                    let prefix = String(sentence[..<matchRange.lowerBound])
                     // Indirect claims, hypothetical clauses and negations are not official action evidence.
-                    guard prefix.range(of: #"\b(?:if|unless|wish|hope|said|says|claim|claims|heard|told|reported|reportedly|not|never)\b|[“\"]"#,
-                                       options: [.regularExpression, .caseInsensitive]) == nil else { continue }
-                    guard sentence.range(of: #"\b(?:not|never|haven't|hasn't|isn't|aren't|didn't)\b"#,
-                                         options: [.regularExpression, .caseInsensitive]) == nil else { continue }
+                    guard !matches(indirectPrefixRegex, in: prefix) else { continue }
+                    guard !matches(negationSentenceRegex, in: sentence) else { continue }
                     kinds.insert(kind)
                 }
             }
@@ -426,14 +465,13 @@ enum ResetDeliveryEvidence {
     }
 
     private static func promisedKind(_ text: String) -> String? {
-        let banked = text.range(of: #"\bbanked\s+reset\b|重置券|可兑换重置"#, options: [.regularExpression, .caseInsensitive]) != nil
-        let direct = text.range(of: #"\bone[- ]time\s+reset\b|\b(?:hard|automatic|global)\s+reset\b|直接重置"#, options: [.regularExpression, .caseInsensitive]) != nil
+        let banked = matches(promisedBankedRegex, in: text)
+        let direct = matches(promisedDirectRegex, in: text)
         return banked == direct ? nil : banked ? "banked" : "regular"
     }
 
     private static func isSeparateBenefit(_ text: String) -> Bool {
-        text.range(of: #"\b(?:compensat\w*|refund\w*|(?:affected|some|selected)\s+(?:users|accounts)|\d+\s*%\s+of\s+users|\d+[km]\s+users)\b|补偿|赔偿|部分用户"#,
-                   options: [.regularExpression, .caseInsensitive]) != nil
+        matches(separateBenefitRegex, in: text)
     }
 
     private static func officialPost(_ url: URL?) -> (id: String, author: String)? {
@@ -451,9 +489,7 @@ enum ResetDeliveryEvidence {
     private static func url(_ value: Any?) -> URL? { (value as? String).flatMap(URL.init(string:)) }
     private static func date(_ value: Any?) -> Date? {
         guard let raw = value as? String else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+        return iso8601FractionalFormatter.date(from: raw) ?? iso8601PlainFormatter.date(from: raw)
     }
     private static func localized(_ value: Any?) -> String? {
         if let text = value as? String { return text }

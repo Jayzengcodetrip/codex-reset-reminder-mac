@@ -29,16 +29,46 @@ enum ResetScheduleTiming {
     static let losAngeles = TimeZone(identifier: "America/Los_Angeles")!
     static let beijing = TimeZone(identifier: "Asia/Shanghai")!
 
-    static func target(for announcement: ResetAnnouncement) -> Target? {
-        guard let scheduled = announcement.scheduledFor else { return nil }
+    private static let losAngelesCalendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = losAngeles
+        return calendar
+    }()
+
+    private static let beijingCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = beijing
+        return calendar
+    }()
+
+    private static let hasClockRegex = try! NSRegularExpression(
+        pattern: #"\b\d{1,2}:[0-5]\d\b|\b\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)\b|\bmidnight\b|\bnoon\b|\d{1,2}\s*(?:点|时)"#,
+        options: [.caseInsensitive]
+    )
+
+    private static let englishWeekdayRegexes: [NSRegularExpression] = [
+        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+    ].map { try! NSRegularExpression(pattern: "\\b\($0)\\b", options: [.caseInsensitive]) }
+
+    private static let formatterLock = NSLock()
+    private static let losAngelesSecondFormatter: DateFormatter = makeFormatter(zone: losAngeles, format: "HH:mm:ss")
+    private static let losAngelesMinuteFormatter: DateFormatter = makeFormatter(zone: losAngeles, format: "HH:mm")
+
+    private static func makeFormatter(zone: TimeZone, format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = zone
+        formatter.dateFormat = format
+        return formatter
+    }
+
+    static func target(for announcement: ResetAnnouncement) -> Target? {
+        guard let scheduled = announcement.scheduledFor else { return nil }
+        let calendar = losAngelesCalendar
         let parts = calendar.dateComponents([.hour, .minute], from: scheduled)
         let text = announcement.title + " " + announcement.summary
-        let hasClock = text.range(
-            of: #"(?i)\b\d{1,2}:[0-5]\d\b|\b\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)\b|\bmidnight\b|\bnoon\b|\d{1,2}\s*(?:点|时)"#,
-            options: .regularExpression
-        ) != nil
+        let hasClock = hasClockRegex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
 
         // NextReset has used 23:59 and, in an earlier snapshot, next-day 00:00
         // to represent a post that only promised a weekday. Neither is a
@@ -74,9 +104,7 @@ enum ResetScheduleTiming {
     static func phase(for announcement: ResetAnnouncement, now: Date) -> Phase? {
         guard let target = target(for: announcement) else { return nil }
         if target.isDateBoundaryEstimate {
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = losAngeles
-            let dayStart = calendar.startOfDay(for: target.displayedTime)
+            let dayStart = losAngelesCalendar.startOfDay(for: target.displayedTime)
             if now < dayStart { return .beforeDate(dayStart) }
             if now < target.countdownDeadline { return .duringDate(target.countdownDeadline) }
             return .afterDate
@@ -169,8 +197,16 @@ enum ResetScheduleTiming {
     }
 
     private static func weekdayText(_ date: Date, zone: TimeZone, language: AppLanguage) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = zone
+        let calendar: Calendar
+        if zone == losAngeles {
+            calendar = losAngelesCalendar
+        } else if zone == beijing {
+            calendar = beijingCalendar
+        } else {
+            var custom = Calendar(identifier: .gregorian)
+            custom.timeZone = zone
+            calendar = custom
+        }
         let index = calendar.component(.weekday, from: date) - 1
         let names = language == .chinese
             ? ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
@@ -180,18 +216,25 @@ enum ResetScheduleTiming {
 
     private static func mentionsWeekday(of date: Date, in text: String, calendar: Calendar) -> Bool {
         let index = calendar.component(.weekday, from: date) - 1
-        let english = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][index]
         let chinese = ["日", "一", "二", "三", "四", "五", "六"][index]
-        return text.range(of: "\\b\(english)\\b", options: [.regularExpression, .caseInsensitive]) != nil
-            || text.contains("周\(chinese)") || text.contains("星期\(chinese)")
+        if text.contains("周\(chinese)") || text.contains("星期\(chinese)") {
+            return true
+        }
+        return englishWeekdayRegexes[index].firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
     private static func formattedTime(_ date: Date, zone: TimeZone, format: String) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = zone
-        formatter.dateFormat = format
-        return formatter.string(from: date)
+        if zone == losAngeles {
+            if format == "HH:mm:ss" {
+                formatterLock.lock()
+                defer { formatterLock.unlock() }
+                return losAngelesSecondFormatter.string(from: date)
+            } else if format == "HH:mm" {
+                formatterLock.lock()
+                defer { formatterLock.unlock() }
+                return losAngelesMinuteFormatter.string(from: date)
+            }
+        }
+        return makeFormatter(zone: zone, format: format).string(from: date)
     }
 }

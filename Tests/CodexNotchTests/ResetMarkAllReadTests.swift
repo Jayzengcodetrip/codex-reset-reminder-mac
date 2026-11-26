@@ -196,25 +196,16 @@ final class ResetMarkAllReadTests: XCTestCase {
         XCTAssertEqual(notificationCount, 0)
     }
 
-    func testUnreadAndAwayFiltersEmptyWithoutChangingSelectionOrHistory() {
+    func testAllHistoryFilterRetainsRecordsAfterLedgerReadStateCleanup() {
         let store = MarkAllReadMemoryStore(ledger: initialLedger())
         let monitor = ResetMonitor(store: store, fetchSnapshot: { self.snapshot() }, now: { self.now })
         defer { monitor.stop() }
         let navigation = ResetAnnouncementsNavigation()
-        navigation.selectRecord(id: "second", markRead: { _ in })
-        navigation.filter = .unread
-        XCTAssertFalse(navigation.visibleRecords(from: monitor.records, undated: []).isEmpty)
-        navigation.filter = .away
-        XCTAssertFalse(navigation.visibleRecords(from: monitor.records, undated: []).isEmpty)
+        navigation.selectRecord(id: "second")
 
         XCTAssertTrue(monitor.markAllRead())
-        for filter in [ResetAnnouncementFilter.unread, .away] {
-            navigation.filter = filter
-            XCTAssertTrue(navigation.visibleRecords(from: monitor.records, undated: []).isEmpty)
-            XCTAssertEqual(navigation.selectedID, "second")
-        }
         navigation.filter = .all
-        XCTAssertEqual(navigation.visibleRecords(from: monitor.records, undated: []).count, 3)
+        XCTAssertEqual(navigation.visibleRecords(from: monitor.records, activePending: []).count, 3)
         XCTAssertEqual(navigation.selectedID, "second")
     }
 

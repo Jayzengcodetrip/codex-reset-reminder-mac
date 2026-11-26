@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Undated posts share one compact summary; only usable dates get a countdown card.
+/// Undated posts share one compact summary with a live elapsed timer;
+/// dated previews each show their own live countdown.
 struct ResetAnnouncementEntriesView: View {
-    let unreadCount: Int
-    let awayUnreadCount: Int
     let statusText: String
+    var errorText: String? = nil
     let announcements: [ResetAnnouncement]
     var undatedAnnouncements: [ResetAnnouncement] = []
     let now: Date
@@ -16,9 +16,12 @@ struct ResetAnnouncementEntriesView: View {
     let action: () -> Void
     var undatedAction: () -> Void = {}
     var confirmAction: (String) -> Void = { _ in }
+    var dismissAction: (String) -> Void = { _ in }
     var restartTimerAction: () -> Void = {}
 
-    static let summaryHeight: CGFloat = 120
+    static let errorColor = Color(red: 1.0, green: 0.38, blue: 0.38)
+    static let summaryHeight: CGFloat = 100
+    static let errorRowHeight: CGFloat = 16
     static let deliveryHeight: CGFloat = 30
     static let sectionSpacing: CGFloat = 6
     static let maximumHeight: CGFloat = 284
@@ -27,26 +30,28 @@ struct ResetAnnouncementEntriesView: View {
         origin == .manualConfirmation || origin == .manualTimerRestart ? 16 : deliveryHeight
     }
 
-    // Retained for existing callers that only have timed countdowns.
+    // Retained for callers that only query card-stack heights by count.
     static func height(for count: Int) -> CGFloat {
         let visibleCount = min(2, max(1, count))
         let entryHeight = count == 0 ? ResetAnnouncementEntryView.emptyHeight : ResetAnnouncementEntryView.announcementHeight
         return CGFloat(visibleCount) * entryHeight + CGFloat(visibleCount - 1) * 8
     }
 
-    static func height(for presentation: ResetTopPresentation, unreadCount: Int = 0) -> CGFloat {
+    static func height(for presentation: ResetTopPresentation, hasError: Bool = false) -> CGFloat {
         height(timedCount: presentation.announcements.count,
                hasUndated: !presentation.undatedAnnouncements.isEmpty,
                hasDelivery: presentation.secondsSinceLastDelivery != nil,
                hasUnconfirmed: presentation.unconfirmedAccountRecovery != nil,
+               hasError: hasError,
                deliveryOrigin: presentation.latestDeliveryOrigin,
                emptyCardHeight: ResetAnnouncementEntryView.emptyCardHeight(
-                   unreadCount: unreadCount, didResetToday: presentation.didResetToday,
+                   didResetToday: presentation.didResetToday,
                    origin: presentation.latestDeliveryOrigin))
     }
 
     static func height(timedCount: Int, hasUndated: Bool, hasDelivery: Bool,
                        hasUnconfirmed: Bool = false,
+                       hasError: Bool = false,
                        deliveryOrigin: ResetDeliveryOrigin? = nil,
                        emptyCardHeight: CGFloat = ResetAnnouncementEntryView.emptyHeight) -> CGFloat {
         let footer = (hasDelivery ? deliveryFooterHeight(origin: deliveryOrigin) : 16) + sectionSpacing
@@ -57,13 +62,16 @@ struct ResetAnnouncementEntriesView: View {
         let count = timedCount + (hasUndated ? 1 : 0)
         let cards = CGFloat(timedCount) * ResetAnnouncementEntryView.announcementHeight
             + (hasUndated ? summaryHeight : 0) + CGFloat(max(0, count - 1)) * 8
+            + (hasError ? errorRowHeight : 0)
         return min(maximumHeight, cards + footer)
     }
 
     private var hasActive: Bool { !announcements.isEmpty || !undatedAnnouncements.isEmpty }
+    private var hasError: Bool { errorText != nil }
     private var height: CGFloat {
         Self.height(timedCount: announcements.count, hasUndated: !undatedAnnouncements.isEmpty,
                     hasDelivery: secondsSinceLastDelivery != nil, hasUnconfirmed: unconfirmedRecovery != nil,
+                    hasError: hasError,
                     deliveryOrigin: latestDeliveryOrigin, emptyCardHeight: emptyCardHeight)
     }
     private var footerHeight: CGFloat {
@@ -71,14 +79,15 @@ struct ResetAnnouncementEntriesView: View {
             + (unconfirmedRecovery != nil ? Self.deliveryHeight + Self.sectionSpacing : 0)
     }
     private var emptyCardHeight: CGFloat {
-        ResetAnnouncementEntryView.emptyCardHeight(unreadCount: unreadCount, didResetToday: didResetToday,
-                                                  origin: latestDeliveryOrigin)
+        ResetAnnouncementEntryView.emptyCardHeight(didResetToday: didResetToday,
+                                                   origin: latestDeliveryOrigin)
     }
     private var contentHeight: CGFloat {
         guard hasActive else { return emptyCardHeight }
         let count = announcements.count + (undatedAnnouncements.isEmpty ? 0 : 1)
         return CGFloat(announcements.count) * ResetAnnouncementEntryView.announcementHeight
             + (undatedAnnouncements.isEmpty ? 0 : Self.summaryHeight) + CGFloat(max(0, count - 1)) * 8
+            + (hasError ? Self.errorRowHeight : 0)
     }
 
     var body: some View {
@@ -208,21 +217,23 @@ struct ResetAnnouncementEntriesView: View {
     private var cards: some View {
         VStack(spacing: 8) {
             if !hasActive {
-                ResetAnnouncementEntryView(unreadCount: unreadCount, awayUnreadCount: awayUnreadCount,
-                    statusText: statusText, announcement: nil,
+                ResetAnnouncementEntryView(statusText: statusText, errorText: errorText, announcement: nil,
                     now: now, language: language, didResetToday: didResetToday,
                     secondsSinceLastDelivery: secondsSinceLastDelivery,
                     latestDeliveryOrigin: latestDeliveryOrigin, action: action)
             } else {
-                ForEach(Array(announcements.reversed()), id: \.id) { announcement in
+                let reversedDated = Array(announcements.reversed())
+                ForEach(reversedDated, id: \.id) { announcement in
+                    let showCardError = undatedAnnouncements.isEmpty && announcement.id == reversedDated.last?.id
                     ResetAnnouncementEntryView(
-                        unreadCount: announcement.id == announcements.last?.id ? unreadCount : 0,
-                        awayUnreadCount: announcement.id == announcements.last?.id ? awayUnreadCount : 0,
-                        statusText: statusText, announcement: announcement,
+                        statusText: statusText,
+                        errorText: showCardError ? errorText : nil,
+                        announcement: announcement,
                         now: now, language: language, didResetToday: didResetToday,
                         secondsSinceLastDelivery: secondsSinceLastDelivery,
                         latestDeliveryOrigin: latestDeliveryOrigin, action: action,
-                        manualConfirmationAction: { confirmAction(announcement.id) })
+                        manualConfirmationAction: { confirmAction(announcement.id) },
+                        manualDismissAction: { dismissAction(announcement.id) })
                 }
                 if let latest = undatedAnnouncements.last {
                     undatedSummary(latest)
@@ -232,57 +243,116 @@ struct ResetAnnouncementEntriesView: View {
     }
 
     private func undatedSummary(_ latest: ResetAnnouncement) -> some View {
-        Button(action: undatedAction) {
+        let elapsed = ResetUndatedSummary.elapsedText(for: latest, now: now, language: language)
+        let cardHeight = Self.summaryHeight + (errorText != nil ? Self.errorRowHeight : 0)
+        return ZStack {
+            Button(action: undatedAction) {
+                Color.clear.contentShape(RoundedRectangle(cornerRadius: 11))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(undatedAccessibilityText(latest, elapsed: elapsed))
+            .accessibilityIdentifier("reset-undated-summary-open")
+            .help(language.localized(chinese: "查看待定预告列表与原帖详情", english: "View pending previews and original post details"))
+
             HStack(spacing: 10) {
-                Image(systemName: awayUnreadCount > 0 || unreadCount > 0 ? "bell.badge" : "text.bubble")
+                Image(systemName: "timer")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(Color.orange)
                     .frame(width: 25)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(ResetUndatedSummary.title(count: undatedAnnouncements.count, language: language))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.orange)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    Text(ResetUndatedSummary.excerpt(latest, language: language))
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.95))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    Text(ResetUndatedSummary.publication(latest, language: language))
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(Color.white.opacity(0.6))
-                        .lineLimit(1)
-                    Text(ResetScheduleTiming.losAngelesNowText(now, language: language))
-                        .font(.system(size: 10.5, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(Color.white.opacity(0.85))
-                    if unreadCount > 0 {
-                        Text(awayUnreadCount > 0
-                             ? language.localized(chinese: "离开期间有 \(awayUnreadCount) 条动态更新", english: "\(awayUnreadCount) updates while away")
-                             : language.localized(chinese: "有 \(unreadCount) 条未读动态", english: "\(unreadCount) unread updates"))
-                            .font(.system(size: 9.5, weight: .semibold))
+                    HStack(spacing: 6) {
+                        Text(ResetUndatedSummary.title(count: undatedAnnouncements.count, language: language))
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Color.orange)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                        if undatedAnnouncements.count == 1 {
+                            dismissButton(for: latest.id)
+                        }
                     }
-                    Text(statusText)
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(Color.white.opacity(0.65))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+
+                    Group {
+                        if let elapsed {
+                            Text(elapsed)
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.orange)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                        } else {
+                            Text(language.localized(chinese: "原帖发布时间未提供", english: "Publication time unavailable"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color.orange.opacity(0.85))
+                                .lineLimit(1)
+                        }
+
+                        Text(ResetUndatedSummary.excerpt(latest, language: language))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(0.92))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+
+                        if let errorText {
+                            Text(errorText)
+                                .font(.system(size: 9.5, weight: .semibold))
+                                .foregroundStyle(Self.errorColor)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.white.opacity(0.45))
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 12)
-            .frame(height: Self.summaryHeight)
-            .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 11))
-            .overlay { RoundedRectangle(cornerRadius: 11).stroke(Color.white.opacity(0.12), lineWidth: 0.5) }
-            .contentShape(RoundedRectangle(cornerRadius: 11))
+        }
+        .frame(maxWidth: .infinity, minHeight: cardHeight, maxHeight: cardHeight)
+        .background(Color.orange.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 11))
+        .overlay {
+            RoundedRectangle(cornerRadius: 11)
+                .stroke(Color.orange.opacity(0.32), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func dismissButton(for id: String) -> some View {
+        Button(action: { dismissAction(id) }) {
+            Label(ResetAnnouncementEntryView.dismissLabel(language: language), systemImage: "eye.slash")
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.78))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3.5)
+                .background(Color.white.opacity(0.10), in: Capsule())
+                .overlay { Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.5) }
         }
         .buttonStyle(.plain)
-        .help(language.localized(chinese: "查看待定预告列表；打开不会清除未读", english: "View undated previews without clearing unread updates"))
+        .fixedSize()
+        .accessibilityIdentifier("manual-reset-dismiss-" + id)
+        .help(language.localized(
+            chinese: "仅从首页收起这条预告，不改动重置计时；可在重置动态里恢复",
+            english: "Hide only from the home card without changing reset timers. Restore anytime in history."))
+    }
+
+    private func undatedAccessibilityText(_ latest: ResetAnnouncement, elapsed: String?) -> String {
+        var parts = [ResetUndatedSummary.title(count: undatedAnnouncements.count, language: language)]
+        if let elapsed { parts.append(elapsed) }
+        parts.append(ResetUndatedSummary.excerpt(latest, language: language))
+        if let errorText { parts.append(errorText) }
+        return parts.joined(separator: "，")
     }
 }
 
@@ -290,17 +360,16 @@ struct ResetAnnouncementEntriesView: View {
 struct ResetAnnouncementEntryView: View {
     static let emptyHeight: CGFloat = 48
 
-    static func emptyCardHeight(unreadCount: Int, didResetToday: Bool, origin: ResetDeliveryOrigin?) -> CGFloat {
-        // Keep ordinary two-line content compact, reserving only the rows that
-        // actually exist for unread updates and a public same-day delivery.
+    static func emptyCardHeight(didResetToday: Bool, origin: ResetDeliveryOrigin?) -> CGFloat {
+        // Keep ordinary two-line content compact, reserving only the extra row
+        // when a same-day public delivery wraps the headline.
         let publicToday = didResetToday && (origin == nil || origin == .publicAnnouncement)
-        return emptyHeight + (unreadCount > 0 ? 14 : 0) + (publicToday ? 16 : 0)
+        return emptyHeight + (publicToday ? 16 : 0)
     }
-    static let announcementHeight: CGFloat = 138
+    static let announcementHeight: CGFloat = 72
 
-    let unreadCount: Int
-    let awayUnreadCount: Int
     let statusText: String
+    var errorText: String? = nil
     let announcement: ResetAnnouncement?
     let now: Date
     let language: AppLanguage
@@ -309,6 +378,7 @@ struct ResetAnnouncementEntryView: View {
     var latestDeliveryOrigin: ResetDeliveryOrigin? = nil
     let action: () -> Void
     var manualConfirmationAction: (() -> Void)? = nil
+    var manualDismissAction: (() -> Void)? = nil
 
     static func emptyHeadline(didResetToday: Bool, origin: ResetDeliveryOrigin?, language: AppLanguage) -> String {
         if case .accountRecovery = origin {
@@ -327,36 +397,33 @@ struct ResetAnnouncementEntryView: View {
 
     private var title: String {
         if announcement != nil {
-            let heading = language.localized(chinese: "临时重置预告", english: "Temporary reset ahead")
-            if awayUnreadCount > 0 {
-                return heading + language.localized(chinese: " · 离开期间有更新", english: " · Updates while away")
-            }
-            return heading + (unreadCount > 0 ? language.localized(chinese: " · 有未读更新", english: " · Unread updates") : "")
+            return language.localized(chinese: "临时重置预告", english: "Temporary reset ahead")
         }
         return Self.emptyHeadline(didResetToday: didResetToday, origin: latestDeliveryOrigin, language: language)
     }
 
     private var highlighted: Bool { announcement != nil }
 
-    private var accessibilityText: String {
-        guard let announcement else { return title + "，" + statusText }
-        var lines = [title, ResetAnnouncementSummary.headline(for: announcement, now: now, language: language)]
-        if ResetScheduleTiming.phase(for: announcement, now: now) != .afterDate {
-            lines.append(ResetAnnouncementSummary.scheduleText(for: announcement, now: now, language: language))
-            if let beijing = ResetScheduleTiming.beijingWeekdayText(for: announcement, now: now, language: language) {
-                lines.append(beijing)
-            }
-            if let risk = ResetScheduleTiming.quotaRiskText(for: announcement, now: now, language: language) {
-                lines.append(risk)
-            }
+    private var cardHeight: CGFloat {
+        guard announcement != nil else {
+            return Self.emptyCardHeight(didResetToday: didResetToday, origin: latestDeliveryOrigin)
         }
-        lines.append(ResetScheduleTiming.losAngelesNowText(now, language: language))
-        lines.append(statusText)
+        return Self.announcementHeight + (errorText != nil ? ResetAnnouncementEntriesView.errorRowHeight : 0)
+    }
+
+    private var accessibilityText: String {
+        guard let announcement else { return title + "，" + (errorText ?? statusText) }
+        var lines = [title, ResetAnnouncementSummary.countdownText(for: announcement, now: now, language: language)]
+        if let errorText { lines.append(errorText) }
         return lines.joined(separator: "，")
     }
 
     static func confirmationLabel(language: AppLanguage) -> String {
         language.localized(chinese: "确认已重置", english: "Confirm reset")
+    }
+
+    static func dismissLabel(language: AppLanguage) -> String {
+        language.localized(chinese: "收起", english: "Hide")
     }
 
     private var confirmationButton: some View {
@@ -365,7 +432,7 @@ struct ResetAnnouncementEntryView: View {
                 .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(Color.orange)
                 .padding(.horizontal, 6)
-                .padding(.vertical, 4)
+                .padding(.vertical, 3.5)
                 .background(Color.orange.opacity(0.12), in: Capsule())
                 .overlay { Capsule().stroke(Color.orange.opacity(0.4), lineWidth: 0.5) }
         }
@@ -377,8 +444,26 @@ struct ResetAnnouncementEntryView: View {
             english: "Complete this preview and restart its timer now. Undo in announcement details."))
     }
 
+    private var dismissButton: some View {
+        Button(action: { manualDismissAction?() }) {
+            Label(Self.dismissLabel(language: language), systemImage: "eye.slash")
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.78))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3.5)
+                .background(Color.white.opacity(0.10), in: Capsule())
+                .overlay { Capsule().stroke(Color.white.opacity(0.22), lineWidth: 0.5) }
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityIdentifier("manual-reset-dismiss-" + (announcement?.id ?? ""))
+        .help(language.localized(
+            chinese: "仅从首页收起这条预告，不改动重置计时；可在重置动态里恢复",
+            english: "Hide only from the home card without changing reset timers. Restore anytime in history."))
+    }
+
     var body: some View {
-        // Sibling buttons keep confirmation independent from opening history.
+        // Sibling buttons keep local actions independent from opening history.
         ZStack {
             Button(action: action) {
                 Color.clear.contentShape(RoundedRectangle(cornerRadius: 11))
@@ -386,104 +471,77 @@ struct ResetAnnouncementEntryView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(accessibilityText)
             .accessibilityIdentifier("reset-announcement-open-" + (announcement?.id ?? "empty"))
-            .help(language.localized(chinese: "查看公告详情；查看额度不会清除未读",
-                                     english: "View announcements; checking quota does not clear unread updates"))
+            .help(language.localized(chinese: "查看重置公告历史与原帖详情",
+                                     english: "View reset announcement history and original posts"))
 
             HStack(spacing: 10) {
-                Image(systemName: announcement != nil ? "clock.fill" : (unreadCount > 0 ? "bell.badge.fill" : "bell"))
+                Image(systemName: announcement != nil ? "clock.fill"
+                      : (errorText != nil ? "exclamationmark.triangle.fill" : "bell"))
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(highlighted ? Color.orange : Color.secondary)
+                    .foregroundStyle(highlighted ? Color.orange
+                                     : (errorText != nil ? ResetAnnouncementEntriesView.errorColor : Color.secondary))
                     .frame(width: 25)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     if let announcement {
-                        Group {
+                        HStack(spacing: 6) {
                             Text(title)
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(Color.orange)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                            if manualConfirmationAction != nil { confirmationButton }
+                            if manualDismissAction != nil { dismissButton }
+                        }
+                        Group {
                             Text(ResetAnnouncementSummary.countdownText(for: announcement, now: now, language: language))
-                                .font(.system(size: ResetScheduleTiming.phase(for: announcement, now: now) == .afterDate ? 13 : 18,
+                                .font(.system(size: ResetScheduleTiming.phase(for: announcement, now: now) == .afterDate ? 13 : 17,
                                               weight: .bold, design: .rounded))
                                 .monospacedDigit()
                                 .foregroundStyle(Color.orange)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.75)
+                            if let errorText {
+                                Text(errorText)
+                                    .font(.system(size: 9.5, weight: .semibold))
+                                    .foregroundStyle(ResetAnnouncementEntriesView.errorColor)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
                         }
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
-                        if ResetScheduleTiming.phase(for: announcement, now: now) != .afterDate {
-                            HStack(spacing: 6) {
-                                Text(ResetAnnouncementSummary.scheduleText(for: announcement, now: now, language: language))
-                                    .font(.system(size: 10.5, weight: .medium))
-                                    .foregroundStyle(Color.white.opacity(0.9))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.7)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .allowsHitTesting(false)
-                                    .accessibilityHidden(true)
-                                if manualConfirmationAction != nil { confirmationButton }
-                            }
-                            Group {
-                                if let beijingWeekday = ResetScheduleTiming.beijingWeekdayText(for: announcement, now: now, language: language) {
-                                    Text(beijingWeekday)
-                                        .font(.system(size: 10.5, weight: .medium))
-                                        .foregroundStyle(Color.white.opacity(0.8))
-                                        .lineLimit(1)
-                                }
-                                if let risk = ResetScheduleTiming.quotaRiskText(for: announcement, now: now, language: language) {
-                                    Text(risk)
-                                        .font(.system(size: 9.5, weight: .semibold))
-                                        .foregroundStyle(Color.orange.opacity(0.9))
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.8)
-                                }
-                            }
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                        } else if manualConfirmationAction != nil {
-                            confirmationButton
-                        }
-                        Text(ResetScheduleTiming.losAngelesNowText(now, language: language))
-                            .font(.system(size: 10.5, weight: .medium, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(Color.white.opacity(0.9))
-                            .lineLimit(1)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
                     } else {
-                        Text(title.replacingOccurrences(of: "（", with: "\n（"))
-                            .font(.system(size: 12, weight: .semibold))
-                            .monospacedDigit()
-                            .multilineTextAlignment(.leading)
-                            .foregroundStyle(didResetToday ? Color.green : Color.white)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.85)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
-                    Group {
-                        if announcement == nil && unreadCount > 0 {
-                            Text(awayUnreadCount > 0
-                                ? language.localized(chinese: "离开期间有 \(awayUnreadCount) 条更新 · 点击查看", english: "\(awayUnreadCount) updates while away · View history")
-                                : language.localized(chinese: "\(unreadCount) 条未读动态 · 点击查看", english: "\(unreadCount) unread updates · View history"))
-                                .font(.system(size: 9.5))
-                                .foregroundStyle(Color.orange)
-                                .lineLimit(1)
+                        Group {
+                            Text(title.replacingOccurrences(of: "（", with: "\n（"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .monospacedDigit()
+                                .multilineTextAlignment(.leading)
+                                .foregroundStyle(didResetToday ? Color.green : Color.white)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.85)
+                            if let errorText {
+                                Text(errorText)
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                    .foregroundStyle(ResetAnnouncementEntriesView.errorColor)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            } else {
+                                Text(statusText)
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(Color.white.opacity(0.65))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
                         }
-                        Text(statusText)
-                            .font(.system(size: announcement == nil ? 10.5 : 9.5))
-                            .foregroundStyle(Color.white.opacity(0.65))
-                            .lineLimit(announcement == nil ? 2 : 1)
-                            .minimumScaleFactor(0.8)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                     }
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
                 }
                 .layoutPriority(1)
                 Spacer(minLength: 0)
@@ -495,9 +553,7 @@ struct ResetAnnouncementEntryView: View {
             }
             .padding(.horizontal, 12)
         }
-        .frame(maxWidth: .infinity,
-               minHeight: announcement == nil ? Self.emptyCardHeight(unreadCount: unreadCount, didResetToday: didResetToday, origin: latestDeliveryOrigin) : Self.announcementHeight,
-               maxHeight: announcement == nil ? Self.emptyCardHeight(unreadCount: unreadCount, didResetToday: didResetToday, origin: latestDeliveryOrigin) : Self.announcementHeight)
+        .frame(maxWidth: .infinity, minHeight: cardHeight, maxHeight: cardHeight)
         .background(highlighted ? Color.orange.opacity(0.12) : Color.white.opacity(0.055))
         .clipShape(RoundedRectangle(cornerRadius: 11))
         .overlay {

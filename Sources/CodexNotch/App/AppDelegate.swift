@@ -27,7 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     panel.level == .popUpMenu,
                     !panel.hidesOnDeactivate,
                     !panel.canBecomeKey && !panel.canBecomeMain,
-                    !panel.isVisible
+                    !panel.isVisible,
+                    // History window follows the user to the current Space.
+                    ResetExperienceCoordinator.historyWindowBehavior.contains(.moveToActiveSpace),
+                    !ResetExperienceCoordinator.historyWindowBehavior.contains(.canJoinAllSpaces)
                 ]
                 guard policies.allSatisfy({ $0 }) else {
                     print("Window restoration self-check failed: panel participation or focus policy")
@@ -88,9 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeCoordinator?.start()
         let experience = ResetExperienceCoordinator()
         resetExperience = experience
-        experience.onStatusChange = { [weak self] unread, away, status, announcements, records, manualTimerRestartedAt in
+        experience.onStatusChange = { [weak self] status, errorText, announcements, records, manualTimerRestartedAt in
             self?.runtimeCoordinator?.updateResetAnnouncements(
-                unread: unread, awayUnread: away, status: status, announcements: announcements, records: records,
+                status: status, errorText: errorText, announcements: announcements, records: records,
                 manualTimerRestartedAt: manualTimerRestartedAt
             )
         }
@@ -100,6 +103,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtimeCoordinator?.onConfirmResetManually = { [weak experience] id in
             guard let experience else { return }
             if !experience.monitor.confirmResetManually(id: id),
+               experience.monitor.manualConfirmationErrorMessage != nil {
+                experience.showAnnouncements()
+            }
+        }
+        runtimeCoordinator?.onDismissResetPreviewManually = { [weak experience] id in
+            guard let experience else { return }
+            if !experience.monitor.dismissPreviewManually(id: id),
                experience.monitor.manualConfirmationErrorMessage != nil {
                 experience.showAnnouncements()
             }

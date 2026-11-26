@@ -1,11 +1,10 @@
 import SwiftUI
 
 enum ResetAnnouncementFilter: String, CaseIterable {
-    case all, undated, unread, away
+    case all, undated
 }
 
 /// The coordinator keeps this state when a window is hidden or brought forward.
-/// Navigating to a list never acknowledges records; details or the explicit bulk action do.
 @MainActor
 final class ResetAnnouncementsNavigation: ObservableObject {
     @Published var filter = ResetAnnouncementFilter.all
@@ -21,34 +20,26 @@ final class ResetAnnouncementsNavigation: ObservableObject {
         selectedID = nil
     }
 
-    func selectRecord(id: String, markRead: (String) -> Void) {
+    func selectRecord(id: String) {
         selectedID = id
-        markRead(id)
     }
 
-    func showDelivery(id: String, markRead: (String) -> Void) {
+    func showDelivery(id: String) {
         filter = .all
-        selectRecord(id: id, markRead: markRead)
+        selectedID = id
     }
 
-    func visibleRecords(from records: [ResetRecord], undated: [ResetAnnouncement]) -> [ResetRecord] {
-        if filter == .undated {
-            // Match the summary's active entries and their publication order.
-            return undated.compactMap { announcement in records.first { $0.id == announcement.id } }
-        }
-        return records.filter { record in
-            switch filter {
-            case .all: return true
-            case .undated: return false // Handled above to preserve the summary's order.
-            case .unread: return record.isUnread
-            case .away: return record.isUnread && record.occurredWhileAway
-            }
+    func visibleRecords(from records: [ResetRecord], activePending: [ResetAnnouncement]) -> [ResetRecord] {
+        switch filter {
+        case .all:
+            return records
+        case .undated:
+            // Match the active previews in publication order.
+            return activePending.compactMap { announcement in records.first { $0.id == announcement.id } }
         }
     }
 }
 
-/// Merely opening this window deliberately leaves every unread record intact.
-/// Selecting details acknowledges one record; the explicit bulk action acknowledges all.
 struct ResetAnnouncementsView: View {
     @ObservedObject var monitor: ResetMonitor
     @ObservedObject var navigation: ResetAnnouncementsNavigation
@@ -65,8 +56,16 @@ struct ResetAnnouncementsView: View {
                                   now: .now, accountReceipt: navigation.accountReceipt)
     }
 
-    private var visibleRecords: [ResetRecord] {
-        navigation.visibleRecords(from: monitor.records, undated: presentation.undatedAnnouncements)
+    private func activePending(for currentPresentation: ResetTopPresentation) -> [ResetAnnouncement] {
+        (currentPresentation.announcements + currentPresentation.undatedAnnouncements).sorted { lhs, rhs in
+            let left = lhs.announcedAt ?? .distantPast
+            let right = rhs.announcedAt ?? .distantPast
+            return left == right ? lhs.id < rhs.id : left < right
+        }
+    }
+
+    private func visibleRecords(for currentPresentation: ResetTopPresentation) -> [ResetRecord] {
+        navigation.visibleRecords(from: monitor.records, activePending: activePending(for: currentPresentation))
     }
 
     private var selectedRecord: ResetRecord? {
@@ -74,37 +73,30 @@ struct ResetAnnouncementsView: View {
     }
 
     var body: some View {
+        let currentPresentation = presentation
         VStack(spacing: 0) {
-            header
+            header(hasActivePreview: currentPresentation.hasActivePreview)
             checkStatus
-            if monitor.awayUnreadCount > 0 {
-                Label(
-                    label("离开期间，Tibo 有 \(monitor.awayUnreadCount) 条新的重置动态", "\(monitor.awayUnreadCount) new Tibo reset updates arrived while you were away"),
-                    systemImage: "moon.zzz.fill"
-                )
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.orange)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .background(Color.orange.opacity(0.09))
-            }
             Divider()
             HSplitView {
-                archiveList
+                archiveList(presentation: currentPresentation)
                     .frame(minWidth: 210, idealWidth: 225, maxWidth: 270)
                 Group {
                     if let record = selectedRecord {
                         ResetAnnouncementDetailView(
                             announcement: record.announcement, language: language,
-                            laterDelivery: presentation.archivedUndated[record.id],
-                            laterAccountReceipt: presentation.archivedForAccountReceipt[record.id],
+                            laterDelivery: currentPresentation.archivedUndated[record.id],
+                            laterAccountReceipt: currentPresentation.archivedForAccountReceipt[record.id],
                             manualCompletedAt: record.manualCompletedAt,
+                            manualDismissedAt: record.manualDismissedAt,
                             canConfirmManually: monitor.canConfirmResetManually(id: record.id),
+                            canDismissManually: monitor.canDismissPreviewManually(id: record.id),
                             onConfirmManually: { monitor.confirmResetManually(id: record.id) },
                             onUndoManualConfirmation: { monitor.undoManualResetConfirmation(id: record.id) },
+                            onDismissManually: { monitor.dismissPreviewManually(id: record.id) },
+                            onUndoManualDismissal: { monitor.undoManualPreviewDismissal(id: record.id) },
                             onOpenDelivery: { delivery in
-                                navigation.showDelivery(id: delivery.id, markRead: monitor.markRead)
+                                navigation.showDelivery(id: delivery.id)
                             }
                         )
                     } else {
@@ -128,44 +120,32 @@ struct ResetAnnouncementsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(.dark)
         .alert(label("操作未保存", "Unable to save"), isPresented: Binding(
-            get: { monitor.readStateErrorMessage != nil || monitor.manualConfirmationErrorMessage != nil },
-            set: { if !$0 { monitor.clearReadStateError(); monitor.clearManualConfirmationError() } }
+            get: { monitor.manualConfirmationErrorMessage != nil },
+            set: { if !$0 { monitor.clearManualConfirmationError() } }
         )) {
             Button(label("好", "OK"), role: .cancel) {
-                monitor.clearReadStateError()
                 monitor.clearManualConfirmationError()
             }
         } message: {
-            Text(monitor.readStateErrorMessage ?? monitor.manualConfirmationErrorMessage
+            Text(monitor.manualConfirmationErrorMessage
                  ?? label("本次操作未能保存，请稍后重试。", "This change could not be saved. Please try again."))
         }
     }
 
-    private var header: some View {
+    private func header(hasActivePreview: Bool) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "bell.badge")
+            Image(systemName: hasActivePreview ? "bell.badge" : "bell")
                 .font(.system(size: 22, weight: .medium))
-                .foregroundStyle(monitor.unreadCount > 0 ? Color.orange : Color.mint)
+                .foregroundStyle(hasActivePreview ? Color.orange : Color.mint)
             VStack(alignment: .leading, spacing: 3) {
                 Text(label("重置动态", "Reset updates"))
                     .font(.system(size: 21, weight: .semibold))
-                Text(monitor.unreadCount > 0
-                     ? label("\(monitor.unreadCount) 条未读 · 选择动态后标为已读", "\(monitor.unreadCount) unread · Select an update to mark it read")
-                     : label("公告记录会保留，方便回来查看", "Announcement history stays available when you return"))
+                Text(label("公告记录会保留，方便回来查看", "Announcement history stays available when you return"))
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             if monitor.isChecking { ProgressView().controlSize(.small) }
-            Button {
-                monitor.markAllRead()
-            } label: {
-                Label(label("全部已读", "Mark all read"), systemImage: "checkmark.circle")
-            }
-            .disabled(!monitor.canMarkAllRead)
-            .accessibilityIdentifier("reset-announcements-mark-all-read")
-            .help(label("将所有现有重置动态标为已读，保留历史和计时；不受当前筛选影响",
-                        "Mark all existing reset updates as read, across every filter. Keep history and timers."))
             Button {
                 monitor.refresh()
             } label: {
@@ -183,7 +163,7 @@ struct ResetAnnouncementsView: View {
                     isChecking: monitor.isChecking, errorMessage: monitor.errorMessage,
                     lastSuccessfulCheck: monitor.lastSuccessfulCheck,
                     hasPending: !monitor.pendingAnnouncements.isEmpty,
-                    unreadCount: monitor.unreadCount, language: language,
+                    unreadCount: 0, language: language,
                     hasNewPreannouncement: monitor.hasNewPreannouncement
                 ),
                 systemImage: monitor.isChecking ? "arrow.triangle.2.circlepath"
@@ -191,11 +171,11 @@ struct ResetAnnouncementsView: View {
                     : monitor.lastSuccessfulCheck != nil ? "checkmark.circle.fill" : "clock"
             )
             .foregroundStyle(monitor.isChecking ? Color.secondary
-                             : monitor.errorMessage != nil ? Color.orange
+                             : monitor.errorMessage != nil ? ResetAnnouncementEntriesView.errorColor
                              : monitor.lastSuccessfulCheck != nil ? Color.mint : Color.secondary)
             .fixedSize(horizontal: false, vertical: true)
             if !monitor.isChecking, let error = monitor.errorMessage {
-                Text(error).foregroundStyle(Color.orange)
+                Text(error).foregroundStyle(ResetAnnouncementEntriesView.errorColor)
                     .fixedSize(horizontal: false, vertical: true)
             }
             statusLine(label("上次成功检查（北京时间）", "Last successful check (Beijing)"), date: monitor.lastSuccessfulCheck)
@@ -215,30 +195,31 @@ struct ResetAnnouncementsView: View {
         }
     }
 
-    private var archiveList: some View {
-        VStack(spacing: 0) {
+    private func archiveList(presentation currentPresentation: ResetTopPresentation) -> some View {
+        let records = visibleRecords(for: currentPresentation)
+        let activeIDs = Set(activePending(for: currentPresentation).map(\.id))
+        return VStack(spacing: 0) {
             Picker(label("筛选", "Filter"), selection: $navigation.filter) {
                 Text(label("全部", "All")).tag(ResetAnnouncementFilter.all)
-                Text(label("待定", "Time pending")).tag(ResetAnnouncementFilter.undated)
-                Text(label("未读", "Unread")).tag(ResetAnnouncementFilter.unread)
-                Text(label("离开期间", "Away")).tag(ResetAnnouncementFilter.away)
+                Text(label("待定", "Pending")).tag(ResetAnnouncementFilter.undated)
             }
             .pickerStyle(.menu)
             .padding(12)
 
-            if visibleRecords.isEmpty {
+            if records.isEmpty {
                 listPlaceholder
             } else {
                 ScrollView {
                     LazyVStack(spacing: 5) {
-                        ForEach(visibleRecords) { record in
+                        ForEach(records) { record in
                             Button {
-                                navigation.selectRecord(id: record.id, markRead: monitor.markRead)
+                                navigation.selectRecord(id: record.id)
                             } label: {
-                                recordLabel(record)
+                                recordLabel(record, presentation: currentPresentation,
+                                            isActive: activeIDs.contains(record.id))
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel(record.announcement.title + (record.isUnread ? label("，未读", ", unread") : ""))
+                            .accessibilityLabel(record.announcement.title)
                         }
                     }
                     .padding(.horizontal, 10)
@@ -249,55 +230,48 @@ struct ResetAnnouncementsView: View {
         .background(Color.black.opacity(0.12))
     }
 
-    private func recordLabel(_ record: ResetRecord) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .top, spacing: 6) {
-                Circle()
-                    .fill(record.isUnread ? Color.orange : Color.clear)
-                    .frame(width: 6, height: 6)
-                    .padding(.top, 4)
-                Text(record.announcement.title)
-                    .font(.system(size: 12, weight: record.isUnread ? .semibold : .medium))
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if record.isUnread && record.occurredWhileAway {
-                Text(label("恢复使用后补查到", "Found during catch-up"))
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.orange)
-                    .padding(.leading, 12)
-            }
+    private func recordLabel(_ record: ResetRecord, presentation currentPresentation: ResetTopPresentation,
+                             isActive: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(record.announcement.title)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             if record.manualCompletedAt != nil {
                 Text(label("已人工确认重置完成", "Manually confirmed complete"))
                     .font(.system(size: 10))
                     .foregroundStyle(Color.mint)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 12)
-            } else if presentation.archivedUndated[record.id] != nil {
+            } else if record.manualDismissedAt != nil {
+                Text(label("已手动收起 · 仅从首页隐藏", "Hidden from home"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if currentPresentation.archivedUndated[record.id] != nil {
                 Text(label("后续已有重置 · 本条关联未确认", "A later reset occurred · Link unconfirmed"))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 12)
-            } else if let receipt = presentation.archivedForAccountReceipt[record.id] {
+            } else if let receipt = currentPresentation.archivedForAccountReceipt[record.id] {
                 Text(label("本账户已收到重置券 · 本条关联未确认", "Reset credit received in this account · Link unconfirmed"))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 12)
                 Text(label("到账：", "Granted: ") + ResetAnnouncementDisplay.beijingTimestamp(receipt.grantedAt)
                      + label(" 北京时间", " Beijing"))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
-                    .padding(.leading, 12)
                     .monospacedDigit()
+            } else if isActive {
+                Text(label("进行中", "Active"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.orange)
             }
             Text(record.announcement.announcedAt.map(ResetAnnouncementDisplay.beijingDate)
                  ?? label("发布时间未提供", "Publication time unavailable"))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-                .padding(.leading, 12)
                 .monospacedDigit()
         }
         .padding(10)
@@ -321,9 +295,7 @@ struct ResetAnnouncementsView: View {
     }
 
     private var listEmptyText: String {
-        if navigation.filter == .undated { return label("没有仍待公布时间的预告", "No announcements are awaiting a time") }
-        if navigation.filter == .unread { return label("没有未读的已接收动态", "No unread updates among received records") }
-        if navigation.filter == .away { return label("没有未读的离开期间动态", "No unread updates received while away") }
+        if navigation.filter == .undated { return label("没有进行中的待定预告", "No active pending previews") }
         if monitor.isChecking { return label("正在读取公开公告…", "Reading public announcements…") }
         if monitor.lastSuccessfulCheck == nil { return label("尚未完成首次检查", "The first check has not completed") }
         if monitor.errorMessage != nil { return label("本次检查未完成，请查看上方状态", "This check did not complete; see the status above") }
@@ -337,7 +309,7 @@ struct ResetAnnouncementsView: View {
                 .foregroundStyle(Color.mint.opacity(0.8))
             Text(label("选择一条重置动态", "Select a reset update"))
                 .font(.system(size: 16, weight: .semibold))
-            Text(label("查看公告、北京时间和原帖。\n打开窗口不会清除未读标记。", "View the announcement, Beijing time and original post.\nOpening this window does not clear unread updates."))
+            Text(label("查看公告详情、发布时间和原帖。", "View the announcement details, publication time and original post."))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -352,9 +324,13 @@ private struct ResetAnnouncementDetailView: View {
     let laterDelivery: ResetAnnouncement?
     let laterAccountReceipt: AccountResetReceipt?
     let manualCompletedAt: Date?
+    let manualDismissedAt: Date?
     let canConfirmManually: Bool
+    let canDismissManually: Bool
     let onConfirmManually: () -> Void
     let onUndoManualConfirmation: () -> Void
+    let onDismissManually: () -> Void
+    let onUndoManualDismissal: () -> Void
     let onOpenDelivery: (ResetAnnouncement) -> Void
 
     private func label(_ chinese: String, _ english: String) -> String {
@@ -394,6 +370,29 @@ private struct ResetAnnouncementDetailView: View {
                             .font(.system(size: 12, weight: .medium))
                             .help(label("撤销这次人工确认；按现有公告与账户记录重新显示状态和计时。",
                                         "Remove your confirmation and use the remaining announcement and account evidence for the status and timer."))
+                        } else if let manualDismissedAt {
+                            Text(label("已手动收起 · 仅从首页隐藏", "Hidden from home"))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(label("收起时间：", "Hidden at: ")
+                                 + ResetAnnouncementDisplay.beijingTimestamp(manualDismissedAt)
+                                 + label(" 北京时间", " Beijing"))
+                                .font(.system(size: 11))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                            Text(label("仅从首页预告卡片移除，未改动重置计时，也不代表重置已完成。",
+                                       "Removed from the home card only. Reset timers were not changed and this preview is not marked complete."))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button(action: onUndoManualDismissal) {
+                                Label(label("恢复到首页", "Restore to home"), systemImage: "arrow.uturn.backward")
+                            }
+                            .buttonStyle(.link)
+                            .font(.system(size: 12, weight: .medium))
+                            .help(label("恢复这条预告在首页显示（若尚未完成或取消）。",
+                                        "Show this preview on the home card again if still active."))
                         } else if let laterDelivery {
                             Text(label("后续已有重置 · 本条关联未确认", "A later reset occurred · Link unconfirmed"))
                                 .font(.system(size: 14, weight: .semibold))
@@ -428,49 +427,54 @@ private struct ResetAnnouncementDetailView: View {
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                        } else if !ResetAnnouncementSummary.isTerminal(announcement),
+                                  ResetScheduleTiming.target(for: announcement) == nil {
+                            if let elapsed = ResetUndatedSummary.elapsedText(for: announcement, now: context.date, language: language) {
+                                Text(elapsed)
+                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                    .monospacedDigit()
+                                    .foregroundStyle(Color.orange)
+                            }
+                            Text(label("公告未提供明确重置时间", "No exact reset time was provided"))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
                         } else {
                             Text(ResetAnnouncementDisplay.timingText(announcement, now: context.date, language: language))
                                 .font(.system(size: 14, weight: .semibold))
+                                .monospacedDigit()
                                 .foregroundStyle(ResetAnnouncementDisplay.isCompleted(announcement) ? Color.mint : Color.orange)
                             if announcement.scheduledFor != nil,
-                               ResetScheduleTiming.phase(for: announcement, now: context.date) != .afterDate {
-                                Text(ResetScheduleTiming.targetText(for: announcement, now: context.date, language: language))
+                               ResetScheduleTiming.phase(for: announcement, now: context.date) != .afterDate,
+                               ResetScheduleTiming.target(for: announcement)?.isDateBoundaryEstimate == true {
+                                Text(ResetScheduleTiming.dateBoundaryExplanation(for: announcement, now: context.date, language: language))
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
-                                if let beijingWeekday = ResetScheduleTiming.beijingWeekdayText(for: announcement, now: context.date, language: language) {
-                                    Text(beijingWeekday)
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                }
-                                if ResetScheduleTiming.target(for: announcement)?.isDateBoundaryEstimate == true {
-                                    Text(ResetScheduleTiming.dateBoundaryExplanation(for: announcement, now: context.date, language: language))
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                    if let risk = ResetScheduleTiming.quotaRiskText(for: announcement, now: context.date, language: language) {
-                                        Text(risk)
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundStyle(Color.orange)
-                                    }
-                                }
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        if manualCompletedAt == nil && !ResetAnnouncementSummary.isTerminal(announcement) {
-                            Text(ResetScheduleTiming.losAngelesNowText(context.date, language: language))
-                                .font(.system(size: 11, design: .rounded))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                        }
-                        if manualCompletedAt == nil && canConfirmManually {
-                            HStack(alignment: .center, spacing: 10) {
-                                Button(action: onConfirmManually) {
-                                    Label(label("确认已重置", "Confirm reset"), systemImage: "checkmark.circle")
+                        if manualCompletedAt == nil && manualDismissedAt == nil && (canConfirmManually || canDismissManually) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(alignment: .center, spacing: 8) {
+                                    if canConfirmManually {
+                                        Button(action: onConfirmManually) {
+                                            Label(label("确认已重置", "Confirm reset"), systemImage: "checkmark.circle")
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .tint(Color.mint)
+                                        .controlSize(.small)
+                                        .accessibilityLabel(label("人工确认这条预告已重置", "Manually confirm this announcement’s reset"))
+                                    }
+                                    if canDismissManually {
+                                        Button(action: onDismissManually) {
+                                            Label(label("收起预告", "Hide preview"), systemImage: "eye.slash")
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                        .accessibilityLabel(label("仅从首页收起这条预告", "Hide this preview from the home card only"))
+                                    }
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .tint(Color.mint)
-                                .controlSize(.small)
-                                .accessibilityLabel(label("人工确认这条预告已重置", "Manually confirm this announcement’s reset"))
-                                Text(label("仅确认这条预告，计时从点击时开始。",
-                                           "Confirms only this announcement; the timer starts now."))
+                                Text(label("「确认已重置」会从点击时重算重置计时；「收起预告」仅隐藏首页卡片，不动计时。",
+                                           "“Confirm reset” restarts the reset timer now; “Hide preview” only removes it from the home card."))
                                     .font(.system(size: 10))
                                     .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)

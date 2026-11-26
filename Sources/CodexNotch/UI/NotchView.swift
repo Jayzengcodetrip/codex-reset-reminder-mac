@@ -11,23 +11,67 @@ final class NotchViewModel: ObservableObject {
     @Published private(set) var surfaceSize: CGSize
     @Published private(set) var isResetScheduleExpanded = false
     @Published private(set) var animationsEnabled: Bool
-    @Published var resetUnreadCount = 0
-    @Published var resetAwayUnreadCount = 0
     @Published var resetStatusText = "正在检查重置公告…"
-    @Published var resetPreannouncements: [ResetAnnouncement] = []
-    @Published var resetRecords: [ResetRecord] = []
-    @Published var manualTimerRestartedAt: Date?
-    @Published var accountResetReceipt: AccountResetReceipt?
-    @Published var accountQuotaRecovery = AccountQuotaRecoveryState()
+    @Published var resetErrorText: String? = nil
+    @Published var resetPreannouncements: [ResetAnnouncement] = [] {
+        didSet {
+            if resetPreannouncements != oldValue {
+                presentationDataVersion &+= 1
+            }
+        }
+    }
+    @Published var resetRecords: [ResetRecord] = [] {
+        didSet {
+            if resetRecords != oldValue {
+                presentationDataVersion &+= 1
+            }
+        }
+    }
+    @Published var manualTimerRestartedAt: Date? {
+        didSet {
+            if manualTimerRestartedAt != oldValue {
+                presentationDataVersion &+= 1
+            }
+        }
+    }
+    @Published var accountResetReceipt: AccountResetReceipt? {
+        didSet {
+            if accountResetReceipt != oldValue {
+                presentationDataVersion &+= 1
+            }
+        }
+    }
+    @Published var accountQuotaRecovery = AccountQuotaRecoveryState() {
+        didSet {
+            if accountQuotaRecovery != oldValue {
+                presentationDataVersion &+= 1
+            }
+        }
+    }
+    private var presentationDataVersion: UInt64 = 0
+    private var cachedTopPresentation: (dataVersion: UInt64, now: Date, value: ResetTopPresentation)?
     var resetTopPresentation: ResetTopPresentation {
-        ResetTopPresentation.make(pending: resetPreannouncements, records: resetRecords, now: now,
-                                  accountReceipt: accountResetReceipt, accountRecovery: accountQuotaRecovery,
-                                  manualTimerRestartedAt: manualTimerRestartedAt)
+        if let cached = cachedTopPresentation,
+           cached.dataVersion == presentationDataVersion,
+           cached.now == now {
+            return cached.value
+        }
+        let computed = ResetTopPresentation.make(
+            pending: resetPreannouncements,
+            records: resetRecords,
+            now: now,
+            accountReceipt: accountResetReceipt,
+            accountRecovery: accountQuotaRecovery,
+            manualTimerRestartedAt: manualTimerRestartedAt
+        )
+        cachedTopPresentation = (presentationDataVersion, now, computed)
+        return computed
     }
 
     var onOpenResetAnnouncements: () -> Void = {}
     var onOpenUndatedAnnouncements: () -> Void = {}
     var onConfirmResetManually: (String) -> Void = { _ in }
+    var onDismissResetPreviewManually: (String) -> Void = { _ in }
     var onRestartResetTimerManually: () -> Void = {}
 
     var onOpenThread: (String) -> Void
@@ -285,7 +329,7 @@ struct NotchView: View {
                     subtitle: NotchText.quotaSubtitle(usage: usage, language: appLanguage),
                     usage: usage,
                     quotaDisplayStyle: quotaDisplayStyle,
-                    resetUnreadCount: model.resetUnreadCount,
+                    hasActiveResetPreview: model.resetTopPresentation.hasActivePreview,
                     action: model.onActivateChatGPT
                 )
             case let .workingCompact(primary, count, usage):
@@ -311,7 +355,7 @@ struct NotchView: View {
                         ),
                     usage: usage,
                     quotaDisplayStyle: quotaDisplayStyle,
-                    resetUnreadCount: model.resetUnreadCount,
+                    hasActiveResetPreview: model.resetTopPresentation.hasActivePreview,
                     action: { model.onOpenThread(primary.threadID) }
                 )
             case let .completedCompact(session, usage):
@@ -329,10 +373,11 @@ struct NotchView: View {
                     subtitle: NotchText.projectName(cwd: session.cwd, language: appLanguage),
                     usage: usage,
                     quotaDisplayStyle: quotaDisplayStyle,
-                    resetUnreadCount: model.resetUnreadCount,
+                    hasActiveResetPreview: model.resetTopPresentation.hasActivePreview,
                     action: { model.onOpenThread(session.threadID) }
                 )
             case let .expanded(content):
+                let topPresentation = model.resetTopPresentation
                 ExpandedNotchView(
                     content: content,
                     now: model.now,
@@ -343,18 +388,18 @@ struct NotchView: View {
                     quotaDisplayStyle: quotaDisplayStyle,
                     language: appLanguage,
                     isResetScheduleExpanded: model.isResetScheduleExpanded,
-                    resetUnreadCount: model.resetUnreadCount,
-                    resetAwayUnreadCount: model.resetAwayUnreadCount,
                     resetStatusText: model.resetStatusText,
-                    resetPreannouncements: model.resetTopPresentation.announcements,
-                    resetUndatedAnnouncements: model.resetTopPresentation.undatedAnnouncements,
-                    resetToday: model.resetTopPresentation.didResetToday,
-                    resetElapsedSeconds: model.resetTopPresentation.secondsSinceLastDelivery,
-                    resetDeliveryOrigin: model.resetTopPresentation.latestDeliveryOrigin,
-                    resetUnconfirmedRecovery: model.resetTopPresentation.unconfirmedAccountRecovery,
+                    resetErrorText: model.resetErrorText,
+                    resetPreannouncements: topPresentation.announcements,
+                    resetUndatedAnnouncements: topPresentation.undatedAnnouncements,
+                    resetToday: topPresentation.didResetToday,
+                    resetElapsedSeconds: topPresentation.secondsSinceLastDelivery,
+                    resetDeliveryOrigin: topPresentation.latestDeliveryOrigin,
+                    resetUnconfirmedRecovery: topPresentation.unconfirmedAccountRecovery,
                     onOpenResetAnnouncements: model.onOpenResetAnnouncements,
                     onOpenUndatedAnnouncements: model.onOpenUndatedAnnouncements,
                     onConfirmResetManually: model.onConfirmResetManually,
+                    onDismissResetPreviewManually: model.onDismissResetPreviewManually,
                     onRestartResetTimerManually: model.onRestartResetTimerManually,
                     onActivateChatGPT: model.onActivateChatGPT,
                     onOpenThread: model.onOpenThread,
@@ -597,7 +642,7 @@ private struct CompactNotchView: View {
     let subtitle: String
     let usage: UsageSnapshot?
     let quotaDisplayStyle: QuotaDisplayStyle
-    let resetUnreadCount: Int
+    let hasActiveResetPreview: Bool
     let action: () -> Void
     @Environment(\.notchAppLanguage) private var language
 
@@ -619,7 +664,7 @@ private struct CompactNotchView: View {
                         width: NotchFloatingBarLayout.appLaneWidth,
                         height: compactHeight
                     )
-                    .overlay(alignment: .topLeading) { unreadDot }
+                    .overlay(alignment: .topLeading) { activePreviewDot }
 
                 SwordWandererBattleView(compactHeight: compactHeight)
                     .frame(
@@ -643,7 +688,7 @@ private struct CompactNotchView: View {
                         width: NotchCompactLayout.indicatorLaneWidth,
                         height: NotchCompactLayout.height
                     )
-                    .overlay(alignment: .topLeading) { unreadDot }
+                    .overlay(alignment: .topLeading) { activePreviewDot }
 
                 Spacer(minLength: 0)
 
@@ -660,8 +705,8 @@ private struct CompactNotchView: View {
     }
 
     @ViewBuilder
-    private var unreadDot: some View {
-        if resetUnreadCount > 0 {
+    private var activePreviewDot: some View {
+        if hasActiveResetPreview {
             Circle()
                 .fill(Color.orange)
                 .frame(width: 6, height: 6)
@@ -705,10 +750,10 @@ private struct CompactNotchView: View {
         if let usage, !usage.windows.isEmpty {
             parts.append(NotchText.quotaSubtitle(usage: usage, language: language))
         }
-        if resetUnreadCount > 0 {
+        if hasActiveResetPreview {
             parts.append(language.localized(
-                chinese: "\(resetUnreadCount) 条未读重置动态",
-                english: "\(resetUnreadCount) unread reset updates"
+                chinese: "有待处理重置预告",
+                english: "Active reset preview"
             ))
         }
         return parts.joined(separator: language == .english ? ", " : "，")
@@ -1400,9 +1445,8 @@ private struct ExpandedNotchView: View {
     let quotaDisplayStyle: QuotaDisplayStyle
     let language: AppLanguage
     let isResetScheduleExpanded: Bool
-    let resetUnreadCount: Int
-    let resetAwayUnreadCount: Int
     let resetStatusText: String
+    let resetErrorText: String?
     let resetPreannouncements: [ResetAnnouncement]
     let resetUndatedAnnouncements: [ResetAnnouncement]
     let resetToday: Bool
@@ -1412,6 +1456,7 @@ private struct ExpandedNotchView: View {
     let onOpenResetAnnouncements: () -> Void
     let onOpenUndatedAnnouncements: () -> Void
     let onConfirmResetManually: (String) -> Void
+    let onDismissResetPreviewManually: (String) -> Void
     let onRestartResetTimerManually: () -> Void
     let onActivateChatGPT: () -> Void
     let onOpenThread: (String) -> Void
@@ -1433,7 +1478,7 @@ private struct ExpandedNotchView: View {
                 subtitle: headerSubtitle,
                 usage: content.usage,
                 quotaDisplayStyle: quotaDisplayStyle,
-                resetUnreadCount: resetUnreadCount,
+                hasActiveResetPreview: !resetPreannouncements.isEmpty || !resetUndatedAnnouncements.isEmpty,
                 action: headerAction
             )
             .frame(
@@ -1447,9 +1492,8 @@ private struct ExpandedNotchView: View {
     private var detailContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             ResetAnnouncementEntriesView(
-                unreadCount: resetUnreadCount,
-                awayUnreadCount: resetAwayUnreadCount,
                 statusText: resetStatusText,
+                errorText: resetErrorText,
                 announcements: resetPreannouncements,
                 undatedAnnouncements: resetUndatedAnnouncements,
                 now: now,
@@ -1461,6 +1505,7 @@ private struct ExpandedNotchView: View {
                 action: onOpenResetAnnouncements,
                 undatedAction: onOpenUndatedAnnouncements,
                 confirmAction: onConfirmResetManually,
+                dismissAction: onDismissResetPreviewManually,
                 restartTimerAction: onRestartResetTimerManually
             )
             .padding(.bottom, 8)
@@ -2345,16 +2390,25 @@ enum NotchText {
         return String(format: "%02d:%02d", minutes, remainingSeconds)
     }
 
+    private static let resetTimestampLock = NSLock()
+    private static let resetTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
     static func resetTimestamp(
         _ date: Date,
         timeZone: TimeZone = .current
     ) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter.string(from: date)
+        resetTimestampLock.lock()
+        defer { resetTimestampLock.unlock() }
+        if resetTimestampFormatter.timeZone != timeZone {
+            resetTimestampFormatter.timeZone = timeZone
+        }
+        return resetTimestampFormatter.string(from: date)
     }
 
     static func resetCountdown(
