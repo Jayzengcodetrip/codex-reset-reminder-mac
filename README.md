@@ -2,7 +2,7 @@
 
 A free, native Mac app that shows your Codex quota, weekly reset countdown, reset-credit expiry times, and public announcements of temporary resets.
 
-[**Download the latest Mac release (v0.2.18)**](https://github.com/Jayzengcodetrip/codex-reset-reminder-mac/releases/latest) · [简体中文](README.zh-CN.md)
+[**Download the latest Mac release**](https://github.com/Jayzengcodetrip/codex-reset-reminder-mac/releases/latest) · [简体中文](README.zh-CN.md)
 
 **Requirements:** macOS 14 or later, Apple Silicon (`arm64`), and a local Codex sign-in. This community app is not an official product of OpenAI, Codex, X, or NextReset.
 

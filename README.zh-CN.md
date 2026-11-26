@@ -2,7 +2,7 @@
 
 一款免费的原生 Mac 小应用：查看 Codex 剩余额度、每周重置倒计时和重置券到期时间，并在公开来源出现新的临时重置预告时提醒你。
 
-[**下载最新版（v0.2.18）**](https://github.com/Jayzengcodetrip/codex-reset-reminder-mac/releases/latest) · [查看源码](https://github.com/Jayzengcodetrip/codex-reset-reminder-mac) · [English](README.md)
+[**下载最新版**](https://github.com/Jayzengcodetrip/codex-reset-reminder-mac/releases/latest) · [查看源码](https://github.com/Jayzengcodetrip/codex-reset-reminder-mac) · [English](README.md)
 
 接口中没有官方原帖和公告身份的站方预测，不作为正式重置预告，不生成倒计时，也不会阻断正式公告检查；正式公告本身格式损坏时，应用仍会如实显示检查失败。
 
